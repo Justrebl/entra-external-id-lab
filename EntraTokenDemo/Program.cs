@@ -2,9 +2,9 @@ using System.Buffers.Text;
 using System.Text.Json;
 using Microsoft.Identity.Client;
 
-if (args is ["create-user", ..])
+if (args is ["create-user" or "update-user", ..])
 {
-    return await CreateUserCommand.RunAsync(args[1..]);
+    return await UserCommands.RunAsync(args[1..], update: args[0] == "update-user");
 }
 
 var raw = args.Length == 4 && args[3] == "--raw";
@@ -15,7 +15,7 @@ if ((args.Length != 3 && !raw) ||
     string.IsNullOrWhiteSpace(args[2]))
 {
     Console.Error.WriteLine("Usage: dotnet run -- <cli-client-id> <https-authority> <api-scope> [--raw]");
-    CreateUserCommand.PrintUsage();
+    UserCommands.PrintUsage();
     return 2;
 }
 

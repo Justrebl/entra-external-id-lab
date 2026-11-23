@@ -17,6 +17,8 @@ var apiUniqueName = '${namePrefix}-API${uniqueNameSuffix}'
 var apiIdentifierUri = 'api://${tenant().tenantId}/${apiUniqueName}'
 var crmReadScopeName = 'CRM.Read'
 var crmReadScopeId = guid(tenant().tenantId, apiUniqueName, crmReadScopeName)
+var readerRoleName = 'Reader'
+var readerRoleId = guid(tenant().tenantId, apiUniqueName, readerRoleName)
 var graphAppId = '00000003-0000-0000-c000-000000000000'
 var graphUserReadWriteAllDelegatedId = '204e0828-b5ca-4ad8-b9f3-f32a958e7cc4'
 var loopbackUris = ['http://localhost']
@@ -46,6 +48,16 @@ resource apiApp 'Microsoft.Graph/applications@v1.0' = {
   displayName: '${namePrefix}_API${displayNameSuffix}'
   signInAudience: 'AzureADMyOrg'
   identifierUris: [apiIdentifierUri]
+  appRoles: [
+    {
+      allowedMemberTypes: ['User']
+      description: 'Read CRM entries.'
+      displayName: readerRoleName
+      id: readerRoleId
+      isEnabled: true
+      value: readerRoleName
+    }
+  ]
   api: {
     acceptMappedClaims: true
     requestedAccessTokenVersion: 2
