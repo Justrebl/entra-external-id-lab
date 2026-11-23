@@ -21,9 +21,12 @@ azd env new entra-lab
 
 ## 2. Deploy the apps and set up a sign-in-only user flow
 
-Choose one path below and enter `DEMO` if the hook prompts for a prefix.
+Expand one path below and enter `DEMO` if the hook prompts for a prefix.
 
-### Manual user flow setup (default)
+<a name="manual-user-flow-setup-default"></a>
+
+<details>
+<summary>Manual user flow setup (default)</summary>
 
 ```powershell
 azd hooks run preprovision
@@ -48,7 +51,12 @@ By default, the hook does not sign in through Microsoft Graph PowerShell or chan
 
 3. In the portal, open the flow under **Use > Applications > Add application**. Add only the lab client, for example `DEMO_CLIENT_DEV`. Do not add the provisioning app to the customer flow.
 
-### Automatic user flow setup (opt-in)
+</details>
+
+<a name="automatic-user-flow-setup-opt-in"></a>
+
+<details>
+<summary>Automatic user flow setup (opt-in)</summary>
 
 **First consent can add the Microsoft Graph Command Line Tools enterprise application to the external tenant.** It is the service principal for Microsoft's existing app registration, not a fourth lab-owned app registration. An administrator must grant consent to delegated `EventListener.ReadWrite.All`. Sign in to Graph as an **External ID User Flow Administrator** or equivalent.
 
@@ -66,6 +74,8 @@ try {
 ```
 
 The hook creates `LabSignIn-<PREFIX>-<SUFFIX>` with **Email with password** and sign-up disabled, links the client, and saves `ENTRA_USER_FLOW_ID`. It reuses a linked sign-in-only flow. It refuses to change the sign-up setting of a shared or unmanaged flow and will not link the client to an unrelated flow with the same name.
+
+</details>
 
 ## 3. Finish the Entra configuration
 
