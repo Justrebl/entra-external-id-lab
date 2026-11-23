@@ -4,7 +4,7 @@ Deploy three app registrations, create a test customer, then inspect the access 
 
 ## 1. Set up the lab with Azure Developer CLI
 
-Run the setup commands in PowerShell 7 from the folder containing `azure.yaml` and `infra`. The Microsoft Graph PowerShell module is needed only for the optional automated flow setup.
+Run the setup commands in PowerShell 7 from the repository root. Use an account with Entra app management permissions and Azure RBAC permissions at tenant scope (`/`).
 
 ```powershell
 # Install only the tools you are missing.
@@ -17,20 +17,11 @@ az bicep upgrade
 
 # Create a local environment only if you do not already have one.
 azd env new entra-lab
-
-# Required for the selected environment.
-azd env set APP_PREFIX DEMO
 ```
 
 ## 2. Deploy the apps and set up a sign-in-only user flow
 
-Both setup paths use the [PowerShell hook](scripts/preprovision.ps1) to deploy the three [Bicep](infra/main.bicep) app registrations. The hook asks for the existing tenant ID if needed, verifies that Azure CLI is signed in to that tenant, and saves the app IDs and scopes to the selected azd environment. It never creates a tenant and does not require a subscription.
-
-**Use `azd hooks run preprovision`, not `azd up` or `azd provision`.** The latter commands also run azd's built-in provisioning, which does not support this tenant-scoped Bicep template.
-
-`APP_PREFIX` is required (1 to 38 ASCII letters or digits). `APP_SUFFIX` is optional: if unset, the hook generates and saves a random 12-character suffix before deploying. To choose your own, run `azd env set APP_SUFFIX DEV` before either path (1 to 20 ASCII letters or digits). The hook uses uppercase names. Prefix `DEMO` and suffix `DEV` give you `DEMO_PROVISIONING_DEV`, `DEMO_API_DEV`, and `DEMO_CLIENT_DEV`. Keep both settings on reruns. Changing either deploys a separate set with a distinct API scope; it does not rename or delete existing registrations.
-
-Use an account with both Entra application management permissions and Azure Resource Manager deployment permissions at tenant scope (`/`). If deployment validation returns `AuthorizationFailed`, check your Azure RBAC role at `/`, not just your Entra directory role.
+Choose one path below and enter `DEMO` if the hook prompts for a prefix.
 
 ### Manual user flow setup (default)
 
@@ -94,17 +85,22 @@ $authority = $lab.ENTRA_AUTHORITY
 if (-not $authority) { $authority = Read-Host "Authority URL, e.g. https://example.ciamlogin.com/" }
 $env:ENTRA_PROVISION_CLIENT_ID = $lab.ENTRA_PROVISION_CLIENT_ID
 $env:ENTRA_EXTENSIONS_APP_ID = (Read-Host "Application (client) ID of b2c-extensions-app").Trim()
+$env:ENTRA_API_APP_ID = $lab.ENTRA_API_APP_ID
 ```
 
 ### New customer
 
-Use `create-user` with an email address you control. Sign in as the provisioning operator, then enter the customer's initial password at the hidden prompt.
+`create-user` assigns `Reader` by default. To enable assignment, manually add the delegated Microsoft Graph permissions `Application.Read.All` and `AppRoleAssignment.ReadWrite.All` to `DEMO_PROVISIONING` and grant admin consent. Use an operator authorized to create users and assign API roles.
+
+Use an email address you control and enter the initial password at the hidden prompt:
 
 ```powershell
 $email = Read-Host "Test customer's email address"
 dotnet run --project .\EntraTokenDemo -- create-user `
-  $authority $email "Jane" "Doe" "customer_label:LAB"
+  $authority $email "Jane" "Doe" "customer_label:LAB" --role Reader
 ```
+
+The label is positional. Use `--role <value>` to select another enabled user role by its case-sensitive value, or `--no-role` to skip assignment without the two extra permissions or the API client ID. If creation succeeds but assignment fails, assign the role manually; do not rerun `create-user`.
 
 ### Existing customer
 
@@ -116,9 +112,9 @@ dotnet run --project .\EntraTokenDemo -- update-user `
   $authority $userObjectId "customer_lab:LAB"
 ```
 
-### Assign the Reader role and inspect the access token
+### Inspect the access token
 
-On the API **enterprise application** (for example, `DEMO_API_DEV`), go to **Users and groups > Add user/group**. Select the test customer, choose **Reader** under **Select a role**, and choose **Assign**. The template defines the role; it does not assign it.
+To assign `Reader` manually, open the API **enterprise application** and choose **Users and groups > Add user/group**. Select the customer and the `Reader` role, then choose **Assign**.
 
 Sign in as the **test customer**, not the provisioning operator:
 
@@ -156,6 +152,7 @@ Delete the three lab app registrations in the Entra admin center. Delete the tes
 
 ## Learn more
 
+- [Infrastructure reference and naming options](infra/README.md)
 - [Azure Developer CLI environments](https://learn.microsoft.com/en-us/azure/developer/azure-developer-cli/work-with-environments)
 - [Run Azure Developer CLI hooks](https://learn.microsoft.com/en-us/azure/developer/azure-developer-cli/azd-extensibility)
 - [Deploy Microsoft Graph Bicep without an Azure subscription](https://learn.microsoft.com/en-us/graph/templates/bicep/how-to-deploy-without-azure-sub)

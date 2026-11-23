@@ -29,7 +29,9 @@ az deployment tenant create --name entra-lab-apps --location westeurope --templa
 
 Use the returned `apiScope` or `apiDefaultScope` exactly as returned. The application ID URI uses the tenant ID and API name; the `aud` claim in a v2 access token is the API's application (client) ID, returned as `apiClientId`.
 
-The azd hook requires `APP_PREFIX` and generates and saves a random `APP_SUFFIX` if none is configured. The direct Azure CLI command above defaults to `DEMO` with unsuffixed names. To set them explicitly, pass `--parameters namePrefix=DEMO appSuffix=DEV` and use a distinct deployment name (for example, `entra-lab-apps-dev`). Match the hook's uppercase prefix and suffix when using either method to redeploy the same apps. Keep them stable: they determine the app names, `uniqueName` values, API identifier URI, and the deterministic `Reader` role ID. The template identifies registrations by `uniqueName`, not display name; it does not automatically adopt apps created in the portal.
+The azd hook prompts for `APP_PREFIX` if missing (1 to 38 ASCII letters or digits) and saves it. It generates and saves a random `APP_SUFFIX` unless you set one with `azd env set APP_SUFFIX DEV` (1 to 20 ASCII letters or digits). Run the [preprovision hook](../scripts/preprovision.ps1) with `azd hooks run preprovision`, not `azd up` or `azd provision`; built-in provisioning does not support this tenant-scoped template. If deployment reports `AuthorizationFailed`, check Azure RBAC at `/`.
+
+The direct Azure CLI command defaults to `DEMO` with unsuffixed names. To reuse hook-created apps, pass matching uppercase values, for example `--parameters namePrefix=DEMO appSuffix=DEV`. Keep both values stable: they determine the app names, API identifier URI, and `Reader` role ID. Bicep identifies registrations by `uniqueName`, not display name.
 
 ## Finish the tenant setup
 
@@ -39,7 +41,7 @@ Use the suffixed app names below if you set a suffix.
 2. Follow the [manual user flow setup](../README.md#manual-user-flow-setup-default): set up an **Email with password** flow, disable sign-up, and link only `DEMO_CLIENT`. Leave `DEMO_PROVISIONING` out of the customer flow; it uses a tenant administrative sign-in. The azd hook configures the flow only when you opt in.
 3. On the **DEMO_API enterprise application**, under **Single sign-on > Attributes & Claims**, add `Customer_Label` via **Directory schema extension > b2c-extensions-app**. Use an existing attribute and a test user with a populated value. If the claim is used for access control, map a separately provisioned `customer_id` that customers cannot set or edit; don't authorize on a self-entered label. See [Add attributes to token claims](https://learn.microsoft.com/en-us/entra/external-id/customers/how-to-add-attributes-to-token).
 
-The flow, extension claim mapping, and role assignment are not deployed by this template. Assign the test customer to `Reader` under **Users and groups** on the API enterprise application, then request a fresh access token to see `roles: ["Reader"]`.
+The template does not deploy the flow, claim mapping, or role assignment. `create-user` assigns `Reader` by default; for existing customers, assign it under **Users and groups** on the API enterprise application.
 
 ## Use the CLI
 
@@ -52,4 +54,4 @@ $authority = Read-Host "Authority URL, e.g. https://example.ciamlogin.com/"
 dotnet run --project .\EntraTokenDemo -- $cliId $authority $scope
 ```
 
-For `create-user` and `update-user`, set `ENTRA_PROVISION_CLIENT_ID` to the `provisioningClientId` output and `ENTRA_EXTENSIONS_APP_ID` to the existing `b2c-extensions-app` application (client) ID. See the [CLI walkthrough](../README.md#4-set-a-customer-label-and-inspect-the-token) for command examples.
+For `create-user` and `update-user`, set `ENTRA_PROVISION_CLIENT_ID` to the `provisioningClientId` output and `ENTRA_EXTENSIONS_APP_ID` to the existing `b2c-extensions-app` application (client) ID. For automatic role assignment, set `ENTRA_API_APP_ID` to `apiClientId` and manually add and grant admin consent for delegated `Application.Read.All` and `AppRoleAssignment.ReadWrite.All` on the provisioning app. Bicep does not request or grant these permissions. See the [CLI walkthrough](../README.md#4-set-a-customer-label-and-inspect-the-token).

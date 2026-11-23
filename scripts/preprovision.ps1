@@ -30,6 +30,7 @@ function Set-LabUserFlow([string]$FlowName, [Guid]$ClientId) {
     $appFilter = [Uri]::EscapeDataString(
         "$flowType/conditions/applications/includeApplications/any(app:app/appId eq '$ClientId')"
     )
+    Write-Host 'Checking for a user flow already linked to the lab client...'
     $assigned = @(Get-GraphCollection -Uri "${flowsUri}?`$filter=$appFilter")
     if ($assigned.Count -gt 1) {
         throw 'More than one user flow was returned for the client. Check its assignments in Entra.'
@@ -43,6 +44,7 @@ function Set-LabUserFlow([string]$FlowName, [Guid]$ClientId) {
     }
 
     if (-not $candidates.Count) {
+        Write-Host "Creating sign-in-only user flow '$FlowName'..."
         $body = @{
             '@odata.type' = "#$flowType"
             displayName = $FlowName
@@ -95,11 +97,13 @@ function Set-LabUserFlow([string]$FlowName, [Guid]$ClientId) {
                 '@odata.type' = "#$flowType"
                 onInteractiveAuthFlowStart = $signInOnly
             } | ConvertTo-Json -Depth 4 -Compress
+            Write-Host 'Disabling self-service sign-up on the dedicated lab user flow...'
             Invoke-MgGraphRequest -Method PATCH -Uri $flowUri -Body $body -ContentType 'application/json' | Out-Null
         }
     }
 
     if (-not $assigned.Count) {
+        Write-Host 'Linking the lab client to the sign-in-only user flow...'
         $body = @{
             '@odata.type' = '#microsoft.graph.authenticationConditionApplication'
             appId = $ClientId.ToString()
@@ -112,15 +116,21 @@ function Set-LabUserFlow([string]$FlowName, [Guid]$ClientId) {
 if ([string]::IsNullOrWhiteSpace($env:AZURE_ENV_NAME)) {
     throw 'Run this hook from a selected azd environment.'
 }
+Write-Host 'Starting preprovision for the selected azd environment.'
 
 $appPrefix = ([string]$env:APP_PREFIX).Trim()
-if (-not $appPrefix) {
-    throw 'APP_PREFIX is required. Set it with azd env set APP_PREFIX DEMO before running the hook.'
+$saveAppPrefix = -not $appPrefix
+if ($saveAppPrefix) {
+    Write-Host 'APP_PREFIX is not set. Your choice will be saved before deployment.'
+    $appPrefix = ([string](Read-Host 'App registration prefix (for example, DEMO)')).Trim()
 }
 if ($appPrefix -cnotmatch '^[A-Za-z0-9]{1,38}$') {
     throw 'APP_PREFIX must contain 1 to 38 ASCII letters or digits.'
 }
 $appPrefix = $appPrefix.ToUpperInvariant()
+if (-not $saveAppPrefix) {
+    Write-Host "Reusing APP_PREFIX '$appPrefix'."
+}
 
 $appSuffix = ([string]$env:APP_SUFFIX).Trim()
 if ($appSuffix -and $appSuffix -cnotmatch '^[A-Za-z0-9]{1,20}$') {
@@ -132,7 +142,13 @@ if ($flowOption -and $flowOption -notin @('true', 'false')) {
     throw 'ENTRA_AUTO_CREATE_USER_FLOW must be true or false. Leave it unset for manual setup.'
 }
 $autoCreateUserFlow = $flowOption -eq 'true'
+if ($autoCreateUserFlow) {
+    Write-Host 'User flow mode: automatic (Microsoft Graph).'
+} else {
+    Write-Host 'User flow mode: manual. The hook will not change user flows.'
+}
 
+Write-Host 'Checking Azure CLI and Bicep prerequisites...'
 if (-not (Get-Command az -ErrorAction SilentlyContinue)) {
     throw 'Install Azure CLI (az) and reopen PowerShell before running this hook.'
 }
@@ -141,6 +157,7 @@ if ($LASTEXITCODE -ne 0) {
     throw 'Bicep is unavailable. Run az bicep upgrade as described in the README prerequisites.'
 }
 if ($autoCreateUserFlow) {
+    Write-Host 'Checking the Microsoft Graph PowerShell module...'
     if (-not (Get-Module -ListAvailable -Name Microsoft.Graph.Authentication)) {
         throw 'Install Microsoft.Graph.Authentication as described in the README, or unset ENTRA_AUTO_CREATE_USER_FLOW.'
     }
@@ -152,7 +169,7 @@ if ([string]::IsNullOrWhiteSpace($tenantInput)) {
     $tenantInput = Read-Host 'Directory (tenant) ID of the existing Entra tenant'
 }
 $tenantId = [Guid]::Empty
-if (-not [Guid]::TryParseExact($tenantInput.Trim(), 'D', [ref]$tenantId) -or $tenantId -eq [Guid]::Empty) {
+if (-not [Guid]::TryParseExact(([string]$tenantInput).Trim(), 'D', [ref]$tenantId) -or $tenantId -eq [Guid]::Empty) {
     throw 'ENTRA_TENANT_ID must be the Directory (tenant) ID of an existing Entra tenant.'
 }
 
@@ -166,8 +183,10 @@ if (-not (Test-Path -LiteralPath $template -PathType Leaf)) {
     throw 'Run the hook from the lab folder containing infra\main.bicep.'
 }
 
+Write-Host 'Checking the Azure CLI sign-in for the requested tenant...'
 $activeTenant = az account show --query tenantId --output tsv 2>$null
 if ($LASTEXITCODE -ne 0 -or $activeTenant -ne $tenantId.ToString()) {
+    Write-Host 'Signing in to the requested tenant with Azure CLI...'
     az login --tenant ($tenantId.ToString()) --allow-no-subscriptions --output none
     if ($LASTEXITCODE -ne 0) { throw 'Azure CLI sign-in failed; no deployment was started.' }
 }
@@ -175,27 +194,39 @@ $activeTenant = az account show --query tenantId --output tsv
 if ($LASTEXITCODE -ne 0 -or $activeTenant -ne $tenantId.ToString()) {
     throw 'Azure CLI is not connected to the requested tenant; no deployment was started.'
 }
+Write-Host 'Verified the Azure CLI tenant.'
 
 if ($autoCreateUserFlow) {
     $flowScope = 'EventListener.ReadWrite.All'
     Write-Warning 'First Graph consent can add the Microsoft Graph Command Line Tools enterprise application to this tenant.'
+    Write-Host 'Sign in to Microsoft Graph in your browser to authorize user flow setup...'
     Connect-MgGraph -TenantId ($tenantId.ToString()) -Scopes $flowScope -Environment Global -ContextScope Process -NoWelcome
     $graphContext = Get-MgContext
     if ($graphContext.TenantId -ne $tenantId.ToString() -or $graphContext.AuthType -ne 'Delegated' -or
         $graphContext.Scopes -notcontains $flowScope) {
         throw "Microsoft Graph must use a delegated sign-in to the requested tenant with $flowScope; no deployment was started."
     }
+    Write-Host 'Verified Microsoft Graph tenant and delegated permission.'
 }
 
+if ($saveAppPrefix) {
+    Write-Host "Saving APP_PREFIX '$appPrefix' in the azd environment..."
+    azd env set APP_PREFIX $appPrefix --environment $env:AZURE_ENV_NAME | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Could not save APP_PREFIX in the azd environment; no deployment was started.' }
+}
 if (-not $appSuffix) {
     $appSuffix = [Guid]::NewGuid().ToString('N').Substring(0, 12).ToUpperInvariant()
-    azd env set APP_SUFFIX $appSuffix --environment $env:AZURE_ENV_NAME
+    Write-Host "Generated APP_SUFFIX '$appSuffix'. Saving it in the azd environment..."
+    azd env set APP_SUFFIX $appSuffix --environment $env:AZURE_ENV_NAME | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Could not save APP_SUFFIX in the azd environment; no deployment was started.' }
+} else {
+    Write-Host "Reusing APP_SUFFIX '$($appSuffix.ToUpperInvariant())'."
 }
 
+$appNameSuffix = $appSuffix.ToUpperInvariant()
 $deploymentPrefix = if ($appPrefix -eq 'DEMO') { 'entra-lab' } else { $appPrefix.ToLowerInvariant() }
 $deploymentName = "$deploymentPrefix-apps-$($appSuffix.ToLowerInvariant())"
-Write-Host "Deploying app registrations with prefix $appPrefix and suffix $($appSuffix.ToUpperInvariant()) in existing tenant $tenantId..."
+Write-Host "Deploying three app registrations: ${appPrefix}_PROVISIONING_$appNameSuffix, ${appPrefix}_API_$appNameSuffix, and ${appPrefix}_CLIENT_$appNameSuffix..."
 $deploymentJson = az deployment tenant create --name $deploymentName --location $location `
     --template-file $template --parameters "namePrefix=$appPrefix" "appSuffix=$appSuffix" `
     --query properties.outputs --output json
@@ -220,16 +251,18 @@ $clientId = [Guid]::Empty
 if (-not [Guid]::TryParse($settings.ENTRA_CLIENT_ID, [ref]$clientId) -or $clientId -eq [Guid]::Empty) {
     throw 'The deployment did not return a valid client application ID.'
 }
+Write-Host 'Bicep deployment complete. Saving app registration outputs...'
 foreach ($entry in $settings.GetEnumerator()) {
-    azd env set $entry.Key $entry.Value --environment $env:AZURE_ENV_NAME
+    azd env set $entry.Key $entry.Value --environment $env:AZURE_ENV_NAME | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Could not save $($entry.Key) in the azd environment." }
 }
-Write-Host "App registrations deployed. Outputs saved to '$env:AZURE_ENV_NAME'."
+Write-Host 'App registration outputs saved to the selected azd environment.'
 
 if ($autoCreateUserFlow) {
-    $flowName = "LabSignIn-$appPrefix-$($appSuffix.ToUpperInvariant())"
+    $flowName = "LabSignIn-$appPrefix-$appNameSuffix"
     $userFlowId = Set-LabUserFlow -FlowName $flowName -ClientId $clientId
-    azd env set ENTRA_USER_FLOW_ID $userFlowId --environment $env:AZURE_ENV_NAME
+    Write-Host 'Saving the user flow output to the selected azd environment...'
+    azd env set ENTRA_USER_FLOW_ID $userFlowId --environment $env:AZURE_ENV_NAME | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Could not save ENTRA_USER_FLOW_ID in the azd environment.' }
     Write-Host 'The client is linked to a sign-in-only user flow. ENTRA_USER_FLOW_ID was saved.'
 } else {
