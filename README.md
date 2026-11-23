@@ -58,7 +58,7 @@ By default, the hook does not sign in through Microsoft Graph PowerShell or chan
 <details>
 <summary>Automatic user flow setup (opt-in)</summary>
 
-**First consent can add the Microsoft Graph Command Line Tools enterprise application to the external tenant.** It is the service principal for Microsoft's existing app registration, not a fourth lab-owned app registration. An administrator must grant consent to delegated `EventListener.ReadWrite.All`. Sign in to Graph as an **External ID User Flow Administrator** or equivalent.
+**First consent can add the Microsoft Graph Command Line Tools enterprise application to the external tenant.** It is the service principal for Microsoft's existing app registration, not a lab-owned app registration. An administrator must grant consent to delegated `EventListener.ReadWrite.All`. Sign in to Graph as an **External ID User Flow Administrator** or equivalent.
 
 Run this in PowerShell 7 from the lab root:
 
