@@ -88,7 +88,10 @@ $env:ENTRA_EXTENSIONS_APP_ID = (Read-Host "Application (client) ID of b2c-extens
 $env:ENTRA_API_APP_ID = $lab.ENTRA_API_APP_ID
 ```
 
-### New customer
+Expand one customer path:
+
+<details>
+<summary>New customer: create an account by email</summary>
 
 `create-user` assigns `Reader` by default. Use an operator authorized to create users and assign API roles after granting consent in step 3.
 
@@ -102,7 +105,10 @@ dotnet run --project .\EntraTokenDemo -- create-user `
 
 The label is positional. Use `--role <value>` to select another enabled user role by its case-sensitive value, or `--no-role` to skip assignment. With `--no-role`, the CLI requests only `User.ReadWrite.All` and does not need the API client ID. If creation succeeds but assignment fails, assign the role manually; do not rerun `create-user`.
 
-### Existing customer
+</details>
+
+<details>
+<summary>Existing customer: set the label by Object ID</summary>
 
 Copy the user's **Object ID** from **Entra ID > Users** in the same tenant. Sign in as an operator authorized to update the user. `update-user` changes only `Customer_Label`; it does not create an account or reset the password. It accepts `customer_lab` or `customer_label` (case-insensitive) and preserves the value's case.
 
@@ -111,6 +117,8 @@ $userObjectId = Read-Host "Existing customer's Object ID"
 dotnet run --project .\EntraTokenDemo -- update-user `
   $authority $userObjectId "customer_lab:LAB"
 ```
+
+</details>
 
 ### Inspect the access token
 
