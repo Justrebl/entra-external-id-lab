@@ -19,6 +19,8 @@ var crmReadScopeName = 'CRM.Read'
 var crmReadScopeId = guid(tenant().tenantId, apiUniqueName, crmReadScopeName)
 var readerRoleName = 'Reader'
 var readerRoleId = guid(tenant().tenantId, apiUniqueName, readerRoleName)
+var m2mRoleName = 'CRM.Read.App'
+var m2mRoleId = guid(tenant().tenantId, apiUniqueName, m2mRoleName)
 var graphAppId = '00000003-0000-0000-c000-000000000000'
 var graphUserReadWriteAllDelegatedId = '204e0828-b5ca-4ad8-b9f3-f32a958e7cc4'
 var graphApplicationReadAllDelegatedId = 'c79f8feb-a9db-4090-85f9-90d820caa0eb'
@@ -67,6 +69,14 @@ resource apiApp 'Microsoft.Graph/applications@v1.0' = {
       isEnabled: true
       value: readerRoleName
     }
+    {
+      allowedMemberTypes: ['Application']
+      description: 'Read CRM entries without a signed-in user.'
+      displayName: 'Read CRM entries as an application'
+      id: m2mRoleId
+      isEnabled: true
+      value: m2mRoleName
+    }
   ]
   api: {
     acceptMappedClaims: true
@@ -104,6 +114,24 @@ resource clientApp 'Microsoft.Graph/applications@v1.0' = {
   ]
 }
 
+resource m2mApp 'Microsoft.Graph/applications@v1.0' = {
+  uniqueName: '${namePrefix}-M2M${uniqueNameSuffix}'
+  displayName: '${namePrefix}_M2M${displayNameSuffix}'
+  signInAudience: 'AzureADMyOrg'
+  isFallbackPublicClient: false
+  requiredResourceAccess: [
+    {
+      resourceAppId: apiApp.appId
+      resourceAccess: [
+        {
+          id: m2mRoleId
+          type: 'Role'
+        }
+      ]
+    }
+  ]
+}
+
 resource provisioningEnterpriseApp 'Microsoft.Graph/servicePrincipals@v1.0' = {
   appId: provisioningApp.appId
 }
@@ -116,9 +144,14 @@ resource clientEnterpriseApp 'Microsoft.Graph/servicePrincipals@v1.0' = {
   appId: clientApp.appId
 }
 
+resource m2mEnterpriseApp 'Microsoft.Graph/servicePrincipals@v1.0' = {
+  appId: m2mApp.appId
+}
+
 output provisioningClientId string = provisioningApp.appId
 output apiClientId string = apiApp.appId
 output clientId string = clientApp.appId
+output m2mClientId string = m2mApp.appId
 output apiScope string = '${apiIdentifierUri}/${crmReadScopeName}'
 output apiDefaultScope string = '${apiIdentifierUri}/.default'
 output apiEnterpriseAppObjectId string = apiEnterpriseApp.id

@@ -1,12 +1,13 @@
 # Entra External ID app registrations
 
-The tenant-scoped template creates three single-tenant app registrations and their enterprise applications in an **existing** tenant. It cannot create a tenant, creates no secrets, and does not grant consent.
+The tenant-scoped template creates four single-tenant app registrations and their enterprise applications in an **existing** tenant. It cannot create a tenant, creates no secrets, and does not grant consent.
 
 | Registration | Configuration |
 | --- | --- |
 | `DEMO_PROVISIONING` | Desktop loopback `http://localhost`; declares delegated Microsoft Graph `User.ReadWrite.All` for customer management and `Application.Read.All` and `AppRoleAssignment.ReadWrite.All` for role assignment. |
-| `DEMO_API` | Exposes admin-consent-only `CRM.Read` and the `Reader` user app role; issues v2 access tokens and accepts mapped claims. |
+| `DEMO_API` | Exposes delegated `CRM.Read`, the `Reader` user role, and the `CRM.Read.App` application role; issues v2 access tokens and accepts mapped claims. |
 | `DEMO_CLIENT` | Desktop loopback `http://localhost`; requests delegated `CRM.Read` from `DEMO_API`. |
+| `DEMO_M2M` | Confidential client; requests the `CRM.Read.App` application permission from `DEMO_API`. |
 
 ## Deploy
 
@@ -42,6 +43,8 @@ Use the suffixed app names below if you set a suffix.
 3. On the **DEMO_API enterprise application**, under **Single sign-on > Attributes & Claims**, add `Customer_Label` via **Directory schema extension > b2c-extensions-app**. Use an existing attribute and a test user with a populated value. If the claim is used for access control, map a separately provisioned `customer_id` that customers cannot set or edit; don't authorize on a self-entered label. See [Add attributes to token claims](https://learn.microsoft.com/en-us/entra/external-id/customers/how-to-add-attributes-to-token).
 
 The template does not deploy the flow, claim mapping, or role assignment. `create-user` assigns `Reader` by default; for existing customers, assign it under **Users and groups** on the API enterprise application.
+
+For [machine-to-machine access](../README.md#machine-to-machine-access-token), separately grant consent on `DEMO_M2M` and create its secret in the portal. The [opt-in claims experiment](../README.md#m2m-claims-mapping-work-in-progress) uses [a separate template](m2m-claims.bicep) and app pair; it is not part of the default deployment.
 
 ## Use the CLI
 

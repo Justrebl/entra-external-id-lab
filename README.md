@@ -1,6 +1,6 @@
 # Entra External ID hands-on lab
 
-Deploy three app registrations, create a test customer, then inspect the access token that the client requests for the API. Use an existing test tenant and an email address you control. The lab does not create a tenant or deploy an API server.
+Deploy the lab app registrations and inspect an API access token from a test customer or a machine-to-machine (M2M) client. Use an existing test tenant and an email address you control. The lab does not create a tenant or deploy an API server.
 
 ## 1. Set up the lab with Azure Developer CLI
 
@@ -164,7 +164,44 @@ For real access control, use a stable, admin-managed `customer_id` rather than a
 
 ## 5. Clean up
 
-Delete the three lab app registrations in the Entra admin center. Delete the test customer and flow only if you created them for the lab; for existing resources, undo any lab-specific assignment or label changes instead. Deleting the ARM deployment record does not delete Entra objects. Remove any temporary Azure RBAC assignment or elevated access used for deployment.
+Delete the four lab app registrations in the Entra admin center. If you ran the M2M claims experiment, also remove its two isolated registrations and the policy identified by `ENTRA_M2M_CLAIMS_POLICY_ID`. Delete the test customer and flow only if you created them for the lab; for existing resources, undo any lab-specific assignment or label changes instead. Deleting the ARM deployment record does not delete Entra objects. Remove any temporary Azure RBAC assignment or elevated access used for deployment.
+
+## Machine-to-machine access token
+
+On the `<PREFIX>_M2M_<SUFFIX>` app registration, grant admin consent for the API's `CRM.Read.App` application permission, then create a short-lived secret under **Certificates & secrets**. The hook saves the app ID, never the secret. [External ID bills M2M authentication per transaction](https://learn.microsoft.com/en-us/entra/external-id/external-identities-pricing).
+
+```powershell
+$lab = azd env get-values --output json | Out-String | ConvertFrom-Json
+$authority = $lab.ENTRA_AUTHORITY
+if (-not $authority) { $authority = Read-Host 'External tenant authority URL' }
+$env:ENTRA_M2M_CLIENT_ID = $lab.ENTRA_M2M_CLIENT_ID
+$env:ENTRA_M2M_CLIENT_SECRET = Read-Host 'M2M client secret value' -MaskInput
+try {
+    dotnet run --project .\EntraTokenDemo -- client-credentials $authority $lab.ENTRA_API_DEFAULT_SCOPE
+} finally {
+    Remove-Item Env:\ENTRA_M2M_CLIENT_SECRET -ErrorAction SilentlyContinue
+}
+```
+
+Look for `aud` matching `ENTRA_API_APP_ID` and `roles` containing `CRM.Read.App`. An app-only access token uses an application role (`roles`), not a delegated scope (`scp`). This path does not use the customer user flow.
+
+## M2M claims mapping (Work In Progress)
+
+**Live app-only issuance of `m2m_customer_tag` is unverified.** This opt-in experiment uses a separate single-tenant API and confidential client. It tests whether a policy can map the client service principal's synthetic `customer:LAB-A` tag into the app-only token. Entra may omit the claim or emit a different value. Do not use the tag for authorization.
+
+Run in an existing test tenant. The Microsoft Graph PowerShell sign-in requires admin consent for delegated `Policy.Read.All`, `Policy.ReadWrite.ApplicationConfiguration`, and `Application.ReadWrite.All`. First consent can add the **Microsoft Graph Command Line Tools** enterprise application. Sign in as an operator authorized to manage applications and claims-mapping policies.
+
+```powershell
+Install-Module Microsoft.Graph.Authentication -Scope CurrentUser -ErrorAction Stop
+$env:ENTRA_ENABLE_M2M_CLAIMS_LAB = 'true'
+try {
+    azd hooks run preprovision
+} finally {
+    Remove-Item Env:\ENTRA_ENABLE_M2M_CLAIMS_LAB -ErrorAction SilentlyContinue
+}
+```
+
+Grant `CRM.Read.App` admin consent and create a short-lived secret for `<PREFIX>_CLAIMS_M2M_<SUFFIX>` in the portal. Rerun the normal M2M commands above with `ENTRA_M2M_CLAIMS_CLIENT_ID`, that client's secret value, and `ENTRA_M2M_CLAIMS_API_DEFAULT_SCOPE` in place of the regular app ID, secret, and scope. Neither template creates a secret or grants consent. The hook attaches the policy only to the isolated API and leaves the main API's `Customer_Label` mapping unchanged.
 
 *This lab guide was drafted with AI assistance.*
 
