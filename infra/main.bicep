@@ -21,6 +21,8 @@ var readerRoleName = 'Reader'
 var readerRoleId = guid(tenant().tenantId, apiUniqueName, readerRoleName)
 var graphAppId = '00000003-0000-0000-c000-000000000000'
 var graphUserReadWriteAllDelegatedId = '204e0828-b5ca-4ad8-b9f3-f32a958e7cc4'
+var graphApplicationReadAllDelegatedId = 'c79f8feb-a9db-4090-85f9-90d820caa0eb'
+var graphAppRoleAssignmentReadWriteAllDelegatedId = '84bccea3-f856-4a8a-967b-dbe0a3d53a64'
 var loopbackUris = ['http://localhost']
 
 resource provisioningApp 'Microsoft.Graph/applications@v1.0' = {
@@ -36,6 +38,14 @@ resource provisioningApp 'Microsoft.Graph/applications@v1.0' = {
       resourceAccess: [
         {
           id: graphUserReadWriteAllDelegatedId
+          type: 'Scope'
+        }
+        {
+          id: graphApplicationReadAllDelegatedId
+          type: 'Scope'
+        }
+        {
+          id: graphAppRoleAssignmentReadWriteAllDelegatedId
           type: 'Scope'
         }
       ]

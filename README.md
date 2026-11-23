@@ -71,7 +71,7 @@ The hook creates `LabSignIn-<PREFIX>-<SUFFIX>` with **Email with password** and 
 
 After the hook succeeds, complete these steps manually in the same external tenant. Use the app names with the prefix and suffix shown by the hook:
 
-1. Under **App registrations > API permissions**, grant admin consent for delegated `CRM.Read` on `DEMO_CLIENT` and delegated Microsoft Graph `User.ReadWrite.All` on `DEMO_PROVISIONING`.
+1. Under **App registrations > API permissions**, review and grant admin consent separately for each app: `CRM.Read` on `DEMO_CLIENT`; Microsoft Graph `User.ReadWrite.All`, `Application.Read.All`, and `AppRoleAssignment.ReadWrite.All` on `DEMO_PROVISIONING`. Bicep declares these delegated permissions but does not grant consent.
 2. Go to **Entra ID > External Identities > Overview > Custom user attributes**. Create a string attribute named `Customer_Label` if it does not exist. The CLI sets it at the tenant level; do not collect it in the user flow.
 3. On the `DEMO_API` **enterprise application**, open **Single sign-on > Attributes & Claims > Add new claim**. Name the claim `Customer_Label` and map it from **Directory schema extension > b2c-extensions-app**, using the `Customer_Label` attribute as its source.
 
@@ -90,7 +90,7 @@ $env:ENTRA_API_APP_ID = $lab.ENTRA_API_APP_ID
 
 ### New customer
 
-`create-user` assigns `Reader` by default. To enable assignment, manually add the delegated Microsoft Graph permissions `Application.Read.All` and `AppRoleAssignment.ReadWrite.All` to `DEMO_PROVISIONING` and grant admin consent. Use an operator authorized to create users and assign API roles.
+`create-user` assigns `Reader` by default. Use an operator authorized to create users and assign API roles after granting consent in step 3.
 
 Use an email address you control and enter the initial password at the hidden prompt:
 
@@ -100,7 +100,7 @@ dotnet run --project .\EntraTokenDemo -- create-user `
   $authority $email "Jane" "Doe" "customer_label:LAB" --role Reader
 ```
 
-The label is positional. Use `--role <value>` to select another enabled user role by its case-sensitive value, or `--no-role` to skip assignment without the two extra permissions or the API client ID. If creation succeeds but assignment fails, assign the role manually; do not rerun `create-user`.
+The label is positional. Use `--role <value>` to select another enabled user role by its case-sensitive value, or `--no-role` to skip assignment. With `--no-role`, the CLI requests only `User.ReadWrite.All` and does not need the API client ID. If creation succeeds but assignment fails, assign the role manually; do not rerun `create-user`.
 
 ### Existing customer
 

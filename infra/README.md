@@ -4,7 +4,7 @@ The tenant-scoped template creates three single-tenant app registrations and the
 
 | Registration | Configuration |
 | --- | --- |
-| `DEMO_PROVISIONING` | Desktop loopback `http://localhost`; requests delegated Microsoft Graph `User.ReadWrite.All` for `create-user` and `update-user`. |
+| `DEMO_PROVISIONING` | Desktop loopback `http://localhost`; declares delegated Microsoft Graph `User.ReadWrite.All` for customer management and `Application.Read.All` and `AppRoleAssignment.ReadWrite.All` for role assignment. |
 | `DEMO_API` | Exposes admin-consent-only `CRM.Read` and the `Reader` user app role; issues v2 access tokens and accepts mapped claims. |
 | `DEMO_CLIENT` | Desktop loopback `http://localhost`; requests delegated `CRM.Read` from `DEMO_API`. |
 
@@ -37,7 +37,7 @@ The direct Azure CLI command defaults to `DEMO` with unsuffixed names. To reuse 
 
 Use the suffixed app names below if you set a suffix.
 
-1. In **App registrations > API permissions**, review and grant admin consent separately for `DEMO_CLIENT` (`CRM.Read`) and `DEMO_PROVISIONING` (`User.ReadWrite.All`). Keep this provisioning permission off the customer-facing client and sign in to the provisioning CLI only as an authorized operator.
+1. In **App registrations > API permissions**, review and grant admin consent separately on `DEMO_CLIENT` and `DEMO_PROVISIONING` for the delegated permissions listed above. The template declares but does not grant them. Keep Microsoft Graph provisioning permissions off the customer-facing client and use the provisioning CLI only as an authorized operator.
 2. Follow the [manual user flow setup](../README.md#manual-user-flow-setup-default): set up an **Email with password** flow, disable sign-up, and link only `DEMO_CLIENT`. Leave `DEMO_PROVISIONING` out of the customer flow; it uses a tenant administrative sign-in. The azd hook configures the flow only when you opt in.
 3. On the **DEMO_API enterprise application**, under **Single sign-on > Attributes & Claims**, add `Customer_Label` via **Directory schema extension > b2c-extensions-app**. Use an existing attribute and a test user with a populated value. If the claim is used for access control, map a separately provisioned `customer_id` that customers cannot set or edit; don't authorize on a self-entered label. See [Add attributes to token claims](https://learn.microsoft.com/en-us/entra/external-id/customers/how-to-add-attributes-to-token).
 
@@ -54,4 +54,4 @@ $authority = Read-Host "Authority URL, e.g. https://example.ciamlogin.com/"
 dotnet run --project .\EntraTokenDemo -- $cliId $authority $scope
 ```
 
-For `create-user` and `update-user`, set `ENTRA_PROVISION_CLIENT_ID` to the `provisioningClientId` output and `ENTRA_EXTENSIONS_APP_ID` to the existing `b2c-extensions-app` application (client) ID. For automatic role assignment, set `ENTRA_API_APP_ID` to `apiClientId` and manually add and grant admin consent for delegated `Application.Read.All` and `AppRoleAssignment.ReadWrite.All` on the provisioning app. Bicep does not request or grant these permissions. See the [CLI walkthrough](../README.md#4-set-a-customer-label-and-inspect-the-token).
+For `create-user` and `update-user`, set `ENTRA_PROVISION_CLIENT_ID` to the `provisioningClientId` output and `ENTRA_EXTENSIONS_APP_ID` to the existing `b2c-extensions-app` application (client) ID. For automatic role assignment, also set `ENTRA_API_APP_ID` to `apiClientId`. With `create-user --no-role` or `update-user`, the CLI requests only `User.ReadWrite.All`. See the [CLI walkthrough](../README.md#4-set-a-customer-label-and-inspect-the-token).
