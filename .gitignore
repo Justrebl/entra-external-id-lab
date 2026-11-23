@@ -1,0 +1,11 @@
+.azure/
+.env
+.env.*
+*.bicepparam
+*.local.json
+*.log
+*.pem
+*.key
+*.pfx
+bin/
+obj/

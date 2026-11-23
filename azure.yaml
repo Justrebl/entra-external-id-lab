@@ -1,0 +1,6 @@
+name: entra-external-id-lab
+hooks:
+  preprovision:
+    shell: pwsh
+    run: .\scripts\preprovision.ps1
+    interactive: true
