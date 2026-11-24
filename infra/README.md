@@ -1,17 +1,19 @@
 # Entra External ID app registrations
 
-The tenant-scoped template creates four single-tenant app registrations and their enterprise applications in an **existing** tenant. It cannot create a tenant, creates no secrets, and does not grant consent.
+The tenant-scoped template creates four single-tenant app registrations, their enterprise applications, and an assigned-membership security group in an **existing** tenant. It cannot create a tenant, creates no secrets, and does not grant delegated consent.
 
 | Registration | Configuration |
 | --- | --- |
-| `DEMO_PROVISIONING` | Desktop loopback `http://localhost`; declares delegated Microsoft Graph `User.ReadWrite.All` for customer management and `Application.Read.All` and `AppRoleAssignment.ReadWrite.All` for role assignment. |
+| `DEMO_PROVISIONING` | Desktop loopback `http://localhost`; declares delegated Microsoft Graph `User.ReadWrite.All` for customer management, `GroupMember.ReadWrite.All` for group membership, and `Application.Read.All` and `AppRoleAssignment.ReadWrite.All` for role assignment. |
 | `DEMO_API` | Exposes delegated `CRM.Read`, the `Reader` user role, and the `CRM.Read.App` application role; issues v2 access tokens and accepts mapped claims. |
 | `DEMO_CLIENT` | Desktop loopback `http://localhost`; requests delegated `CRM.Read` from `DEMO_API`. |
-| `DEMO_M2M` | Confidential client; requests the `CRM.Read.App` application permission from `DEMO_API`. |
+| `DEMO_M2M` | Confidential client; its service principal receives `CRM.Read.App` directly on the `DEMO_API` service principal. |
 
 ## Deploy
 
 For the azd workflow, see the [lab guide](../README.md). To deploy directly, run these commands from `infra` using Azure CLI and Bicep 0.36.1 or later. The deploying identity needs permission to create or update Entra applications and service principals and run ARM deployments at tenant scope (`/`). See [tenant deployment without an Azure subscription](https://learn.microsoft.com/en-us/graph/templates/bicep/how-to-deploy-without-azure-sub) and [Graph deployment permissions](https://learn.microsoft.com/en-us/graph/templates/bicep/concept-permissions-and-privileges).
+
+The deployment also needs Microsoft Graph permissions to manage the [security group](https://learn.microsoft.com/en-us/graph/templates/bicep/reference/groups?view=graph-bicep-1.0) (`Group.ReadWrite.All`) and grant the [API application role](https://learn.microsoft.com/en-us/graph/templates/bicep/reference/approleassignedto?view=graph-bicep-1.0) (`AppRoleAssignment.ReadWrite.All` and `Application.Read.All`). For an interactive Azure CLI deployment, the signed-in operator must be authorized for both actions in the target tenant. These are deployment permissions, separate from the provisioning app's delegated permissions.
 
 ```powershell
 $tenantId = [Guid]::Empty
@@ -32,7 +34,7 @@ Use the returned `apiScope` or `apiDefaultScope` exactly as returned. The applic
 
 The azd hook prompts for `APP_PREFIX` if missing (1 to 38 ASCII letters or digits) and saves it. It generates and saves a random `APP_SUFFIX` unless you set one with `azd env set APP_SUFFIX DEV` (1 to 20 ASCII letters or digits). Run the [preprovision hook](../scripts/preprovision.ps1) with `azd hooks run preprovision`, not `azd up` or `azd provision`; built-in provisioning does not support this tenant-scoped template. If deployment reports `AuthorizationFailed`, check Azure RBAC at `/`.
 
-The direct Azure CLI command defaults to `DEMO` with unsuffixed names. To reuse hook-created apps, pass matching uppercase values, for example `--parameters namePrefix=DEMO appSuffix=DEV`. Keep both values stable: they determine the app names, API identifier URI, and `Reader` role ID. Bicep identifies registrations by `uniqueName`, not display name.
+The direct Azure CLI command defaults to `DEMO` with unsuffixed names. To reuse hook-created resources, pass matching uppercase values, for example `--parameters namePrefix=DEMO appSuffix=DEV`. Keep both values stable: they determine the names, API identifier URI, and app role IDs. Bicep identifies registrations and the security group by `uniqueName`, not display name. The group is named `<PREFIX>-Customers-<SUFFIX>` and its `customerGroupObjectId` output is saved by the hook as `ENTRA_CUSTOMER_GROUP_ID`.
 
 ## Finish the tenant setup
 
@@ -42,9 +44,9 @@ Use the suffixed app names below if you set a suffix.
 2. Follow the [manual user flow setup](../README.md#manual-user-flow-setup-default): set up an **Email with password** flow, disable sign-up, and link only `DEMO_CLIENT`. Leave `DEMO_PROVISIONING` out of the customer flow; it uses a tenant administrative sign-in. The azd hook configures the flow only when you opt in.
 3. On the **DEMO_API enterprise application**, under **Single sign-on > Attributes & Claims**, add `Customer_Label` via **Directory schema extension > b2c-extensions-app**. Use an existing attribute and a test user with a populated value. If the claim is used for access control, map a separately provisioned `customer_id` that customers cannot set or edit; don't authorize on a self-entered label. See [Add attributes to token claims](https://learn.microsoft.com/en-us/entra/external-id/customers/how-to-add-attributes-to-token).
 
-The template does not deploy the flow, claim mapping, or role assignment. `create-user` assigns `Reader` by default; for existing customers, assign it under **Users and groups** on the API enterprise application.
+The template does not deploy the flow, claim mapping, or customer role assignments. `create-user` adds the customer directly to the lab security group and assigns `Reader` by default; for existing customers, assign `Reader` under **Users and groups** on the API enterprise application.
 
-For [machine-to-machine access](../README.md#machine-to-machine-access-token), separately grant consent on `DEMO_M2M` and create its secret in the portal. The [opt-in claims experiment](../README.md#m2m-claims-mapping-work-in-progress) uses [a separate template](m2m-claims.bicep) and app pair; it is not part of the default deployment.
+For [machine-to-machine access](../README.md#machine-to-machine-access-token), create the standard M2M client's secret in the portal. The standard M2M role assignment does not use group membership and the template does not enable group claims. The [opt-in claims experiment](../README.md#m2m-claims-mapping-work-in-progress) uses [a separate template](m2m-claims.bicep) and app pair; it is not part of the default deployment.
 
 ## Use the CLI
 
@@ -57,4 +59,8 @@ $authority = Read-Host "Authority URL, e.g. https://example.ciamlogin.com/"
 dotnet run --project .\EntraTokenDemo -- $cliId $authority $scope
 ```
 
-For `create-user` and `update-user`, set `ENTRA_PROVISION_CLIENT_ID` to the `provisioningClientId` output and `ENTRA_EXTENSIONS_APP_ID` to the existing `b2c-extensions-app` application (client) ID. For automatic role assignment, also set `ENTRA_API_APP_ID` to `apiClientId`. With `create-user --no-role` or `update-user`, the CLI requests only `User.ReadWrite.All`. See the [CLI walkthrough](../README.md#4-set-a-customer-label-and-inspect-the-token).
+For `create-user` and `update-user`, set `ENTRA_PROVISION_CLIENT_ID` to the `provisioningClientId` output and `ENTRA_EXTENSIONS_APP_ID` to the existing `b2c-extensions-app` application (client) ID. For `create-user`, set `ENTRA_CUSTOMER_GROUP_ID` to `customerGroupObjectId`, and set `ENTRA_API_APP_ID` to `apiClientId` unless using `--no-role`. `create-user --no-role` still requests `User.ReadWrite.All` and `GroupMember.ReadWrite.All`; `update-user` requests only `User.ReadWrite.All` and does not use the group. See the [CLI walkthrough](../README.md#4-set-a-customer-label-and-inspect-the-token).
+
+## Validate locally
+
+From the repository root, run `pwsh -NoProfile -File .\tests\preprovision.Tests.ps1` to compile the template and check the group, role assignment, and hook outputs without signing in or deploying. The hook runs against mocked Azure CLI and azd commands.

@@ -4,7 +4,7 @@ Deploy the lab app registrations and inspect an API access token from a test cus
 
 ## 1. Set up the lab with Azure Developer CLI
 
-Run the setup commands in PowerShell 7 from the repository root. Use an account with Entra app management permissions and Azure RBAC permissions at tenant scope (`/`).
+Run the setup commands in PowerShell 7 from the repository root. Use an account authorized to manage the lab's Entra apps, create and update its security group, and grant application permissions to its API (for example, an Application Administrator who can also manage the group). The account also needs Azure RBAC permissions at tenant scope (`/`). See the [deployment permission requirements](infra/README.md#deploy).
 
 ```powershell
 # Install only the tools you are missing.
@@ -19,9 +19,11 @@ az bicep upgrade
 azd env new entra-lab
 ```
 
-## 2. Deploy the apps and set up a sign-in-only user flow
+## 2. Deploy the lab resources and set up a sign-in-only user flow
 
 Expand one path below and enter `DEMO` if the hook prompts for a prefix.
+
+Both paths deploy the lab apps and the assigned-membership security group `<PREFIX>-Customers-<SUFFIX>`, save the group object ID as `ENTRA_CUSTOMER_GROUP_ID`, and assign `CRM.Read.App` directly to the standard M2M enterprise application on the standard API.
 
 <a name="manual-user-flow-setup-default"></a>
 
@@ -81,7 +83,7 @@ The hook creates `LabSignIn-<PREFIX>-<SUFFIX>` with **Email with password** and 
 
 After the hook succeeds, complete these steps manually in the same external tenant. Use the app names with the prefix and suffix shown by the hook:
 
-1. Under **App registrations > API permissions**, review and grant admin consent separately for each app: `CRM.Read` on `DEMO_CLIENT`; Microsoft Graph `User.ReadWrite.All`, `Application.Read.All`, and `AppRoleAssignment.ReadWrite.All` on `DEMO_PROVISIONING`. Bicep declares these delegated permissions but does not grant consent.
+1. Under **App registrations > API permissions**, review and grant admin consent separately for each app: `CRM.Read` on `DEMO_CLIENT`; Microsoft Graph `User.ReadWrite.All`, `GroupMember.ReadWrite.All`, `Application.Read.All`, and `AppRoleAssignment.ReadWrite.All` on `DEMO_PROVISIONING`. Bicep declares these delegated permissions but does not grant consent. If upgrading an existing deployment, rerun the hook and grant consent for the new group membership permission.
 2. Go to **Entra ID > External Identities > Overview > Custom user attributes**. Create a string attribute named `Customer_Label` if it does not exist. The CLI sets it at the tenant level; do not collect it in the user flow.
 3. On the `DEMO_API` **enterprise application**, open **Single sign-on > Attributes & Claims > Add new claim**. Name the claim `Customer_Label` and map it from **Directory schema extension > b2c-extensions-app**, using the `Customer_Label` attribute as its source.
 
@@ -96,6 +98,7 @@ if (-not $authority) { $authority = Read-Host "Authority URL, e.g. https://examp
 $env:ENTRA_PROVISION_CLIENT_ID = $lab.ENTRA_PROVISION_CLIENT_ID
 $env:ENTRA_EXTENSIONS_APP_ID = (Read-Host "Application (client) ID of b2c-extensions-app").Trim()
 $env:ENTRA_API_APP_ID = $lab.ENTRA_API_APP_ID
+$env:ENTRA_CUSTOMER_GROUP_ID = $lab.ENTRA_CUSTOMER_GROUP_ID
 ```
 
 Expand one customer path:
@@ -103,7 +106,7 @@ Expand one customer path:
 <details>
 <summary>New customer: create an account by email</summary>
 
-`create-user` assigns `Reader` by default. Use an operator authorized to create users and assign API roles after granting consent in step 3.
+`create-user` adds the customer directly to the lab security group and assigns `Reader` by default. After granting consent in step 3, use an operator authorized to create users, manage membership of the lab group, and assign API roles if requested.
 
 Use an email address you control and enter the initial password at the hidden prompt:
 
@@ -113,7 +116,7 @@ dotnet run --project .\EntraTokenDemo -- create-user `
   $authority $email "Jane" "Doe" "customer_label:LAB" --role Reader
 ```
 
-The label is positional. Use `--role <value>` to select another enabled user role by its case-sensitive value, or `--no-role` to skip assignment. With `--no-role`, the CLI requests only `User.ReadWrite.All` and does not need the API client ID. If creation succeeds but assignment fails, assign the role manually; do not rerun `create-user`.
+The label is positional. Use `--role <value>` to select another enabled user role by its case-sensitive value, or `--no-role` to skip the API role. With `--no-role`, the CLI still requires `ENTRA_CUSTOMER_GROUP_ID` and requests `User.ReadWrite.All` and `GroupMember.ReadWrite.All`, but does not need the API client ID. If the account is created but membership or role assignment is not confirmed, check **Members** on the lab group and **Users and groups** on the API enterprise application as directed by the CLI. Complete the missing steps manually; do not rerun `create-user`.
 
 </details>
 
@@ -164,11 +167,11 @@ For real access control, use a stable, admin-managed `customer_id` rather than a
 
 ## 5. Clean up
 
-Delete the four lab app registrations in the Entra admin center. If you ran the M2M claims experiment, also remove its two isolated registrations and the policy identified by `ENTRA_M2M_CLAIMS_POLICY_ID`. Delete the test customer and flow only if you created them for the lab; for existing resources, undo any lab-specific assignment or label changes instead. Deleting the ARM deployment record does not delete Entra objects. Remove any temporary Azure RBAC assignment or elevated access used for deployment.
+Delete the four lab app registrations and the lab security group (object ID `ENTRA_CUSTOMER_GROUP_ID`) in the Entra admin center. If you ran the M2M claims experiment, also remove its two isolated registrations and the policy identified by `ENTRA_M2M_CLAIMS_POLICY_ID`. Delete the test customer and flow only if you created them for the lab; for existing resources, undo any lab-specific assignment or label changes instead. Deleting the ARM deployment record does not delete Entra objects. Remove any temporary Azure RBAC assignment or elevated access used for deployment.
 
 ## Machine-to-machine access token
 
-On the `<PREFIX>_M2M_<SUFFIX>` app registration, grant admin consent for the API's `CRM.Read.App` application permission, then create a short-lived secret under **Certificates & secrets**. The hook saves the app ID, never the secret. [External ID bills M2M authentication per transaction](https://learn.microsoft.com/en-us/entra/external-id/external-identities-pricing).
+The deployment grants `CRM.Read.App` directly to the `<PREFIX>_M2M_<SUFFIX>` service principal on the standard API. No separate consent step is needed for this permission. On the M2M app registration, create a short-lived secret under **Certificates & secrets**. The hook saves the app ID, never the secret. [External ID bills M2M authentication per transaction](https://learn.microsoft.com/en-us/entra/external-id/external-identities-pricing).
 
 ```powershell
 $lab = azd env get-values --output json | Out-String | ConvertFrom-Json
@@ -201,7 +204,7 @@ try {
 }
 ```
 
-Grant `CRM.Read.App` admin consent and create a short-lived secret for `<PREFIX>_CLAIMS_M2M_<SUFFIX>` in the portal. Rerun the normal M2M commands above with `ENTRA_M2M_CLAIMS_CLIENT_ID`, that client's secret value, and `ENTRA_M2M_CLAIMS_API_DEFAULT_SCOPE` in place of the regular app ID, secret, and scope. Neither template creates a secret or grants consent. The hook attaches the policy only to the isolated API and leaves the main API's `Customer_Label` mapping unchanged.
+Grant `CRM.Read.App` admin consent and create a short-lived secret for `<PREFIX>_CLAIMS_M2M_<SUFFIX>` in the portal. Rerun the normal M2M commands above with `ENTRA_M2M_CLAIMS_CLIENT_ID`, that client's secret value, and `ENTRA_M2M_CLAIMS_API_DEFAULT_SCOPE` in place of the regular app ID, secret, and scope. The isolated template does not create a secret or grant consent. The hook attaches the policy only to the isolated API and leaves the main API's `Customer_Label` mapping unchanged.
 
 *This lab guide was drafted with AI assistance.*
 
