@@ -1,25 +1,42 @@
 # Entra External ID hands-on lab
 
-Deploy the lab app registrations and inspect an API access token from a test customer or a machine-to-machine (M2M) client. Use an existing test tenant and an email address you control. The lab does not create a tenant or deploy an API server.
+Deploy sample app registrations into an existing Microsoft Entra External ID tenant, then inspect delegated customer and machine-to-machine (M2M) API access tokens. The lab demonstrates customer provisioning, group and app-role claims, and an opt-in claims-mapping experiment. It does not create a tenant or deploy an API server. See the [infrastructure reference](infra/README.md).
 
-## 1. Set up the lab with Azure Developer CLI
+## Technical requirements
 
-Run the setup commands in PowerShell 7 from the repository root. Use an account authorized to manage the lab's Entra apps, create and update its security group, and grant application permissions to its API (for example, an Application Administrator who can also manage the group). The account also needs Azure RBAC permissions at tenant scope (`/`). See the [deployment permission requirements](infra/README.md#deploy).
+- PowerShell 7
+- Azure Developer CLI (`azd`)
+- Azure CLI (`az`)
+- .NET 10 SDK
+- An existing External ID test tenant and an email address you control
+- An operator authorized to deploy tenant-scoped Entra applications, manage the lab security group, and assign API application roles; see [deployment permissions](infra/README.md#deploy)
+
+## Setup
+
+### 1. Install tools and create an Azure Developer CLI environment
+
+From the repository root, open PowerShell 7. Install only tools that are missing by running their corresponding lines:
 
 ```powershell
-# Install only the tools you are missing.
 winget install --exact --id Microsoft.Azd
 winget install --exact --id Microsoft.AzureCLI
 winget install --exact --id Microsoft.DotNet.SDK.10
+```
 
-# If az or azd is still not recognized after installation, reopen PowerShell.
+After installing a tool, complete these manual steps:
+
+1. Open a new PowerShell 7 window.
+2. Change to the repository root.
+
+Upgrade or install Bicep, then create the `entra-lab` azd environment only if it does not already exist:
+
+```powershell
 az bicep upgrade
-
-# Create a local environment only if you do not already have one.
+# Run this only when the entra-lab environment does not already exist.
 azd env new entra-lab
 ```
 
-## 2. Deploy the lab resources and set up a sign-in-only user flow
+### 2. Deploy the lab resources and set up a sign-in-only user flow
 
 Expand one path below and enter `DEMO` if the hook prompts for a prefix.
 
@@ -79,16 +96,23 @@ The hook creates `LabSignIn-<PREFIX>-<SUFFIX>` with **Email with password** and 
 
 </details>
 
-## 3. Finish the Entra configuration
+### 3. Finish the Entra configuration
 
 After the hook succeeds, complete these steps manually in the same external tenant. Use the app names with the prefix and suffix shown by the hook:
 
 1. Under **App registrations > API permissions**, review and grant admin consent separately for each app: `CRM.Read` on `DEMO_CLIENT`; Microsoft Graph `User.ReadWrite.All`, `GroupMember.ReadWrite.All`, `Application.Read.All`, and `AppRoleAssignment.ReadWrite.All` on `DEMO_PROVISIONING`. Bicep declares these delegated permissions but does not grant consent. If upgrading an existing deployment, rerun the hook and grant consent for the new group membership permission.
 2. Go to **Entra ID > External Identities > Overview > Custom user attributes**. Create a string attribute named `Customer_Label` if it does not exist. The CLI sets it at the tenant level; do not collect it in the user flow.
 3. On the `DEMO_API` **enterprise application**, open **Single sign-on > Attributes & Claims > Add new claim**. Name the claim `Customer_Label` and map it from **Directory schema extension > b2c-extensions-app**, using the `Customer_Label` attribute as its source.
+
 The deployment configures the `DEMO_API` app registration to emit security group object IDs in the `groups` claim of access tokens. This is set through `groupMembershipClaims: SecurityGroup`; no separate token configuration step is required. The claim is configured on the API registration and applies to its access tokens, not only M2M tokens. Group IDs appear separately from app roles.
 
-## 4. Set a customer label and inspect the token
+## Execution
+
+### Customer sign-in and delegated API token
+
+Follow this scenario after completing [Setup](#setup).
+
+#### Set a customer label and inspect the token
 
 Use the .NET 10 SDK and run the CLI from the repository root. Load these settings for either customer path:
 
@@ -117,9 +141,16 @@ dotnet run --project .\EntraTokenDemo -- create-user `
   $authority $email "Jane" "Doe" "customer_label:LAB" --role Reader
 ```
 
-The label is positional. Use `--role <value>` to select another enabled user role by its case-sensitive value, or `--no-role` to skip the API role. With `--no-role`, the CLI still requires `ENTRA_CUSTOMER_GROUP_ID` and requests `User.ReadWrite.All` and `GroupMember.ReadWrite.All`, but does not need the API client ID. If the account is created but membership or role assignment is not confirmed, check **Members** on the lab group and **Users and groups** on the API enterprise application as directed by the CLI. Complete the missing steps manually; do not rerun `create-user`.
+The label is positional.
 
-On a Graph failure, the CLI prints the HTTP status, request ID, and Graph error code and message. It redacts the submitted password and access token rather than dumping request or response bodies. Error messages may still contain customer or tenant details; review them before sharing. For HTTP 400, use the message to identify the rejected property before retrying.
+> [!NOTE]
+> Use `--role <value>` to select another enabled user role by its case-sensitive value, or `--no-role` to skip the API role. With `--no-role`, the CLI still requires `ENTRA_CUSTOMER_GROUP_ID` and requests `User.ReadWrite.All` and `GroupMember.ReadWrite.All`, but does not need the API client ID.
+
+> [!WARNING]
+> If the account is created but membership or role assignment is not confirmed, check **Members** on the lab group and **Users and groups** on the API enterprise application as directed by the CLI. Complete only the missing steps manually; do not rerun `create-user`.
+
+> [!WARNING]
+> On a Graph failure, the CLI prints the HTTP status, request ID, and Graph error code and message. It redacts the submitted password and access token rather than dumping request or response bodies. Error messages may still contain customer or tenant details; review them before sharing. For HTTP 400, use the message to identify the rejected property before retrying.
 
 </details>
 
@@ -136,18 +167,23 @@ dotnet run --project .\EntraTokenDemo -- update-user `
 
 </details>
 
-### Inspect the access token
+#### Inspect the access token
 
-To assign `Reader` manually, open the API **enterprise application** and choose **Users and groups > Add user/group**. Select the customer and the `Reader` role, then choose **Assign**.
+Before requesting a token, assign `Reader` manually if needed:
 
-Sign in as the **test customer**, not the provisioning operator:
+1. Open the API **enterprise application** and choose **Users and groups > Add user/group**.
+2. Select the customer and the `Reader` role, then choose **Assign**.
+3. Sign in as the **test customer**, not the provisioning operator.
 
 ```powershell
 dotnet run --project .\EntraTokenDemo -- `
   $lab.ENTRA_CLIENT_ID $authority $lab.ENTRA_API_SCOPE
 ```
 
-Look for `aud` matching `ENTRA_API_APP_ID`, `scp` containing `CRM.Read`, `roles` containing `Reader` after assignment, and `Customer_Label` set to `LAB`. Try again with `ENTRA_API_DEFAULT_SCOPE` in place of `ENTRA_API_SCOPE`: it still targets the same API. Bare `.default` does not. The CLI decodes the payload by default; it does not validate it.
+> [!TIP]
+> In the decoded token, look for `aud` matching `ENTRA_API_APP_ID`, `scp` containing `CRM.Read`, `roles` containing `Reader` after assignment, and `Customer_Label` set to `LAB`.
+
+The CLI decodes the payload by default; it does not validate it.
 
 Example decoded payload (selected claims; identifiers redacted and label synthetic):
 
@@ -164,15 +200,17 @@ Example decoded payload (selected claims; identifiers redacted and label synthet
 }
 ```
 
-Add `--raw` after the scope only when you need the bearer token locally. Treat it like a password; do not share it or paste it into logs.
+> [!NOTE]
+> `ENTRA_API_DEFAULT_SCOPE` can be used in place of `ENTRA_API_SCOPE`; it still targets the same API. Bare `.default` does not.
+
+> [!WARNING]
+> Add `--raw` after the scope only when you need the bearer token locally. Treat it like a password; do not share it or paste it into logs.
 
 For real access control, use a stable, admin-managed `customer_id` rather than a user-entered label. Validate the access token and enforce the required scopes, roles, and customer data boundary in the API.
 
-## 5. Clean up
+### Machine-to-machine access token
 
-Delete the four lab app registrations and the lab security group (object ID `ENTRA_CUSTOMER_GROUP_ID`) in the Entra admin center. If you ran the M2M claims experiment, also remove its two isolated registrations and the policy identified by `ENTRA_M2M_CLAIMS_POLICY_ID`. Delete the test customer and flow only if you created them for the lab; for existing resources, undo any lab-specific assignment or label changes instead. Deleting the ARM deployment record does not delete Entra objects. Remove any temporary Azure RBAC assignment or elevated access used for deployment.
-
-## Machine-to-machine access token
+Follow this scenario after completing [Setup](#setup). The standard M2M app and API role assignment are created by deployment; you create the client secret in the portal.
 
 The deployment grants `CRM.Read.App` directly to the `<PREFIX>_M2M_<SUFFIX>` service principal on the standard API. No separate consent step is needed for this permission. On the M2M app registration, create a short-lived secret under **Certificates & secrets**. The hook saves the app ID, never the secret. [External ID bills M2M authentication per transaction](https://learn.microsoft.com/en-us/entra/external-id/external-identities-pricing).
 
@@ -189,7 +227,10 @@ try {
 }
 ```
 
-Look for `aud` matching `ENTRA_API_APP_ID` and **`roles`** containing `CRM.Read.App`. After deployment, request a fresh token and check whether **`groups`** contains the ID in `ENTRA_CUSTOMER_GROUP_ID`. If it is missing, verify the M2M **enterprise application** is a member of the lab group and that the API app registration has `groupMembershipClaims` set to `SecurityGroup`. The application role is assigned directly, not inherited from the group. This path does not use the customer user flow or a delegated scope (`scp`).
+> [!TIP]
+> In the decoded token, look for `aud` matching `ENTRA_API_APP_ID`, **`roles`** containing `CRM.Read.App`, and **`groups`** containing the ID in `ENTRA_CUSTOMER_GROUP_ID`. If the group ID is missing, verify the M2M **enterprise application** is a member of the lab group and that the API app registration has `groupMembershipClaims` set to `SecurityGroup`.
+
+The application role is assigned directly, not inherited from the group. This path does not use the customer user flow or a delegated scope (`scp`).
 
 Example decoded M2M payload (selected claims; identifiers redacted):
 
@@ -203,9 +244,10 @@ Example decoded M2M payload (selected claims; identifiers redacted):
 }
 ```
 
-## M2M claims mapping (Work In Progress)
+### M2M claims mapping experiment (opt-in, work in progress)
 
-**Live app-only issuance of `m2m_customer_tag` is unverified.** This opt-in experiment uses a separate single-tenant API and confidential client. It tests whether a policy can map the client service principal's synthetic `customer:LAB-A` tag into the app-only token. Entra may omit the claim or emit a different value. Do not use the tag for authorization.
+> [!WARNING]
+> Live app-only issuance of `m2m_customer_tag` is unverified. This opt-in experiment uses a separate single-tenant API and confidential client. It tests whether a policy can map the client service principal's synthetic `customer:LAB-A` tag into the app-only token. Entra may omit the claim or emit a different value. Do not use the tag for authorization.
 
 Run in an existing test tenant. The Microsoft Graph PowerShell sign-in requires admin consent for delegated `Policy.Read.All`, `Policy.ReadWrite.ApplicationConfiguration`, and `Application.ReadWrite.All`. First consent can add the **Microsoft Graph Command Line Tools** enterprise application. Sign in as an operator authorized to manage applications and claims-mapping policies.
 
@@ -219,13 +261,39 @@ try {
 }
 ```
 
-Grant `CRM.Read.App` admin consent and create a short-lived secret for `<PREFIX>_CLAIMS_M2M_<SUFFIX>` in the portal. Rerun the normal M2M commands above with `ENTRA_M2M_CLAIMS_CLIENT_ID`, that client's secret value, and `ENTRA_M2M_CLAIMS_API_DEFAULT_SCOPE` in place of the regular app ID, secret, and scope. The isolated template does not create a secret or grant consent. The hook attaches the policy only to the isolated API and leaves the main API's `Customer_Label` mapping unchanged.
+After the hook completes, do these steps in the portal:
 
-*This lab guide was drafted with AI assistance.*
+1. Grant `CRM.Read.App` admin consent for the isolated claims M2M client.
+2. Create a short-lived secret for `<PREFIX>_CLAIMS_M2M_<SUFFIX>`.
 
-## Learn more
+The isolated template does not create a secret or grant consent. From the repository root in PowerShell 7, run:
 
-- [Infrastructure reference and naming options](infra/README.md)
+```powershell
+$lab = azd env get-values --output json | Out-String | ConvertFrom-Json
+$authority = $lab.ENTRA_AUTHORITY
+if (-not $authority) { $authority = Read-Host 'External tenant authority URL' }
+$env:ENTRA_M2M_CLIENT_ID = $lab.ENTRA_M2M_CLAIMS_CLIENT_ID
+$env:ENTRA_M2M_CLIENT_SECRET = Read-Host 'M2M client secret value' -MaskInput
+try {
+    dotnet run --project .\EntraTokenDemo -- client-credentials $authority $lab.ENTRA_M2M_CLAIMS_API_DEFAULT_SCOPE
+} finally {
+    Remove-Item Env:\ENTRA_M2M_CLIENT_SECRET -ErrorAction SilentlyContinue
+}
+```
+
+The hook attaches the policy only to the isolated API and leaves the main API's `Customer_Label` mapping unchanged. Compare the decoded token with the experiment's expected `m2m_customer_tag` claim; issuance and value are unverified, so do not use the claim for authorization.
+
+## Cleanup
+
+Delete the four lab app registrations and the lab security group (object ID `ENTRA_CUSTOMER_GROUP_ID`) in the Entra admin center. If you ran the M2M claims experiment, also remove its two isolated registrations and the policy identified by `ENTRA_M2M_CLAIMS_POLICY_ID`. Delete the test customer and flow only if you created them for the lab; for existing resources, undo any lab-specific assignment or label changes instead. Deleting the ARM deployment record does not delete Entra objects. Remove any temporary Azure RBAC assignment or elevated access used for deployment.
+
+## Troubleshooting and FAQ
+
+See the [troubleshooting FAQ](docs/faq.md) for deployment authorization, user provisioning, and token-claim issues.
+
+## Additional references
+
+- [Infrastructure reference and direct deployment](infra/README.md)
 - [Azure Developer CLI environments](https://learn.microsoft.com/en-us/azure/developer/azure-developer-cli/work-with-environments)
 - [Run Azure Developer CLI hooks](https://learn.microsoft.com/en-us/azure/developer/azure-developer-cli/azd-extensibility)
 - [Deploy Microsoft Graph Bicep without an Azure subscription](https://learn.microsoft.com/en-us/graph/templates/bicep/how-to-deploy-without-azure-sub)
@@ -233,3 +301,5 @@ Grant `CRM.Read.App` admin consent and create a short-lived secret for `<PREFIX>
 - [Disable self-service sign-up in an External ID user flow](https://learn.microsoft.com/en-us/entra/external-id/customers/how-to-disable-sign-up-user-flow)
 - [Add External ID attributes to token claims](https://learn.microsoft.com/en-us/entra/external-id/customers/how-to-add-attributes-to-token)
 - [Validate access-token claims in your API](https://learn.microsoft.com/en-us/entra/identity-platform/claims-validation)
+
+*This lab guide was drafted with AI assistance.*

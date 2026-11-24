@@ -46,7 +46,7 @@ Use the suffixed app names below if you set a suffix.
 
 The template does not deploy the flow, claim mapping, or customer role assignments. `create-user` adds the customer directly to the lab security group and assigns `Reader` by default; for existing customers, assign `Reader` under **Users and groups** on the API enterprise application.
 
-The API app registration sets `groupMembershipClaims` to `SecurityGroup`, so access tokens include security group object IDs in `groups`. This applies to the API's access tokens, not only M2M tokens. For [machine-to-machine access](../README.md#machine-to-machine-access-token), create the standard M2M client's secret in the portal. The template appends the M2M service principal to the lab group without removing existing members. It grants the M2M role directly, not through the group. The [opt-in claims experiment](../README.md#m2m-claims-mapping-work-in-progress) uses [a separate template](m2m-claims.bicep) and app pair; it is not part of the default deployment.
+The API app registration sets `groupMembershipClaims` to `SecurityGroup`, so access tokens include security group object IDs in `groups`. This applies to the API's access tokens, not only M2M tokens. For [machine-to-machine access](../README.md#machine-to-machine-access-token), create the standard M2M client's secret in the portal. The template appends the M2M service principal to the lab group without removing existing members. It grants the M2M role directly, not through the group. The [opt-in claims experiment](../README.md#m2m-claims-mapping-experiment-opt-in-work-in-progress) uses [a separate template](m2m-claims.bicep) and app pair; it is not part of the default deployment.
 
 ## Use the CLI
 
@@ -59,7 +59,7 @@ $authority = Read-Host "Authority URL, e.g. https://example.ciamlogin.com/"
 dotnet run --project .\EntraTokenDemo -- $cliId $authority $scope
 ```
 
-For `create-user` and `update-user`, set `ENTRA_PROVISION_CLIENT_ID` to the `provisioningClientId` output and `ENTRA_EXTENSIONS_APP_ID` to the existing `b2c-extensions-app` application (client) ID. For `create-user`, set `ENTRA_CUSTOMER_GROUP_ID` to `customerGroupObjectId`, and set `ENTRA_API_APP_ID` to `apiClientId` unless using `--no-role`. `create-user --no-role` still requests `User.ReadWrite.All` and `GroupMember.ReadWrite.All`; `update-user` requests only `User.ReadWrite.All` and does not use the group. See the [CLI walkthrough](../README.md#4-set-a-customer-label-and-inspect-the-token).
+For `create-user` and `update-user`, set `ENTRA_PROVISION_CLIENT_ID` to the `provisioningClientId` output and `ENTRA_EXTENSIONS_APP_ID` to the existing `b2c-extensions-app` application (client) ID. For `create-user`, set `ENTRA_CUSTOMER_GROUP_ID` to `customerGroupObjectId`, and set `ENTRA_API_APP_ID` to `apiClientId` unless using `--no-role`. `create-user --no-role` still requests `User.ReadWrite.All` and `GroupMember.ReadWrite.All`; `update-user` requests only `User.ReadWrite.All` and does not use the group. See the [CLI walkthrough](../README.md#set-a-customer-label-and-inspect-the-token).
 
 ## Validate locally
 
