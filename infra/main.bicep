@@ -32,11 +32,15 @@ var customerGroupName = '${namePrefix}-Customers${uniqueNameSuffix}'
 resource customerGroup 'Microsoft.Graph/groups@v1.0' = {
   uniqueName: customerGroupName
   displayName: customerGroupName
-  description: 'Customers created by the Entra External ID lab.'
+  description: 'Customers and the M2M service principal for the Entra External ID lab.'
   groupTypes: []
   mailEnabled: false
   mailNickname: '${namePrefix}-CG${uniqueNameSuffix}'
   securityEnabled: true
+  members: {
+    relationshipSemantics: 'append'
+    relationships: [m2mEnterpriseApp.id]
+  }
 }
 
 resource provisioningApp 'Microsoft.Graph/applications@v1.0' = {
@@ -75,6 +79,7 @@ resource apiApp 'Microsoft.Graph/applications@v1.0' = {
   uniqueName: apiUniqueName
   displayName: '${namePrefix}_API${displayNameSuffix}'
   signInAudience: 'AzureADMyOrg'
+  groupMembershipClaims: 'SecurityGroup'
   identifierUris: [apiIdentifierUri]
   appRoles: [
     {
