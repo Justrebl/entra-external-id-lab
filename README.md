@@ -23,7 +23,7 @@ azd env new entra-lab
 
 Expand one path below and enter `DEMO` if the hook prompts for a prefix.
 
-Both paths deploy the lab apps and the assigned-membership security group `<PREFIX>-Customers-<SUFFIX>`, save the group object ID as `ENTRA_CUSTOMER_GROUP_ID`, and assign `CRM.Read.App` directly to the standard M2M enterprise application on the standard API.
+Both paths deploy the lab apps and the assigned-membership security group `<PREFIX>-Customers-<SUFFIX>`, save the group object ID as `ENTRA_CUSTOMER_GROUP_ID`, and add the standard M2M service principal to the group without removing existing members. The deployment assigns `CRM.Read.App` directly to the standard M2M enterprise application on the standard API.
 
 <a name="manual-user-flow-setup-default"></a>
 
@@ -86,6 +86,7 @@ After the hook succeeds, complete these steps manually in the same external tena
 1. Under **App registrations > API permissions**, review and grant admin consent separately for each app: `CRM.Read` on `DEMO_CLIENT`; Microsoft Graph `User.ReadWrite.All`, `GroupMember.ReadWrite.All`, `Application.Read.All`, and `AppRoleAssignment.ReadWrite.All` on `DEMO_PROVISIONING`. Bicep declares these delegated permissions but does not grant consent. If upgrading an existing deployment, rerun the hook and grant consent for the new group membership permission.
 2. Go to **Entra ID > External Identities > Overview > Custom user attributes**. Create a string attribute named `Customer_Label` if it does not exist. The CLI sets it at the tenant level; do not collect it in the user flow.
 3. On the `DEMO_API` **enterprise application**, open **Single sign-on > Attributes & Claims > Add new claim**. Name the claim `Customer_Label` and map it from **Directory schema extension > b2c-extensions-app**, using the `Customer_Label` attribute as its source.
+The deployment configures the `DEMO_API` app registration to emit security group object IDs in the `groups` claim of access tokens. This is set through `groupMembershipClaims: SecurityGroup`; no separate token configuration step is required. The claim is configured on the API registration and applies to its access tokens, not only M2M tokens. Group IDs appear separately from app roles.
 
 ## 4. Set a customer label and inspect the token
 
@@ -117,6 +118,8 @@ dotnet run --project .\EntraTokenDemo -- create-user `
 ```
 
 The label is positional. Use `--role <value>` to select another enabled user role by its case-sensitive value, or `--no-role` to skip the API role. With `--no-role`, the CLI still requires `ENTRA_CUSTOMER_GROUP_ID` and requests `User.ReadWrite.All` and `GroupMember.ReadWrite.All`, but does not need the API client ID. If the account is created but membership or role assignment is not confirmed, check **Members** on the lab group and **Users and groups** on the API enterprise application as directed by the CLI. Complete the missing steps manually; do not rerun `create-user`.
+
+On a Graph failure, the CLI prints the HTTP status, request ID, and Graph error code and message. It redacts the submitted password and access token rather than dumping request or response bodies. Error messages may still contain customer or tenant details; review them before sharing. For HTTP 400, use the message to identify the rejected property before retrying.
 
 </details>
 
@@ -186,7 +189,19 @@ try {
 }
 ```
 
-Look for `aud` matching `ENTRA_API_APP_ID` and `roles` containing `CRM.Read.App`. An app-only access token uses an application role (`roles`), not a delegated scope (`scp`). This path does not use the customer user flow.
+Look for `aud` matching `ENTRA_API_APP_ID` and **`roles`** containing `CRM.Read.App`. After deployment, request a fresh token and check whether **`groups`** contains the ID in `ENTRA_CUSTOMER_GROUP_ID`. If it is missing, verify the M2M **enterprise application** is a member of the lab group and that the API app registration has `groupMembershipClaims` set to `SecurityGroup`. The application role is assigned directly, not inherited from the group. This path does not use the customer user flow or a delegated scope (`scp`).
+
+Example decoded M2M payload (selected claims; identifiers redacted):
+
+```json
+{
+  "aud": "<api-app-client-id>",
+  "groups": ["<lab-security-group-object-id>"],
+  "oid": "<m2m-service-principal-object-id>",
+  "roles": ["CRM.Read.App"],
+  "ver": "2.0"
+}
+```
 
 ## M2M claims mapping (Work In Progress)
 

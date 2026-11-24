@@ -7,12 +7,21 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Bicep compilation failed.' }
     $template = $compiled | Out-String | ConvertFrom-Json
     $group = $template.resources.customerGroup
+    $members = $group.properties.members
     if ($group.type -ne 'Microsoft.Graph/groups@v1.0' -or
         $group.properties.securityEnabled -ne $true -or $group.properties.mailEnabled -ne $false -or
         $null -eq $group.properties.groupTypes -or $group.properties.groupTypes.Count -ne 0 -or
-        $group.properties.members -or
+        $members.relationshipSemantics -cne 'append' -or
+        $members.relationships.Count -ne 1 -or
+        $members.relationships[0] -ne "[reference('m2mEnterpriseApp').id]" -or
+        $group.dependsOn -notcontains 'm2mEnterpriseApp' -or
         $template.outputs.customerGroupObjectId.value -ne "[reference('customerGroup').id]") {
-        throw 'Expected an assigned security group that preserves customer memberships and exports its object ID.'
+        throw 'Expected the assigned security group to append the M2M service principal, preserve other members, and export its object ID.'
+    }
+
+    $api = $template.resources.apiApp.properties
+    if ($api.groupMembershipClaims -cne 'SecurityGroup') {
+        throw 'Expected the API app registration to emit security group IDs as access-token group claims.'
     }
 
     $assignment = $template.resources.m2mReaderAssignment

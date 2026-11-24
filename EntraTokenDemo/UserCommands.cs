@@ -182,16 +182,18 @@ internal static class UserCommands
                 retryHint = "Check whether the account exists before retrying.";
             }
             var extensionProperty = $"extension_{extensionsId:N}_{AttributeName}";
-            using var response = update
-                ? await http.PatchAsJsonAsync($"{GraphUsersUrl}/{userId:D}", new Dictionary<string, string> { [extensionProperty] = label })
-                : await CreateUserAsync(http, tenantDomain, email, givenName, surname, extensionProperty, label);
-            if (response is null)
+            var password = update ? null : ReadPassword();
+            if (!update && string.IsNullOrWhiteSpace(password))
             {
+                Console.Error.WriteLine("No password entered; no account was created.");
                 return 2;
             }
+            using var response = update
+                ? await http.PatchAsJsonAsync($"{GraphUsersUrl}/{userId:D}", new Dictionary<string, string> { [extensionProperty] = label })
+                : await CreateUserAsync(http, tenantDomain, email, givenName, surname, extensionProperty, label, password!);
             if (response.StatusCode != (update ? HttpStatusCode.NoContent : HttpStatusCode.Created))
             {
-                ReportGraphStatus($"Graph did not report {(update ? "an update" : "creation")}", response);
+                await ReportGraphStatusAsync($"Graph did not report {(update ? "an update" : "creation")}", response, http, password);
                 return 1;
             }
 
@@ -218,14 +220,14 @@ internal static class UserCommands
                     }
                     else
                     {
-                        ReportGraphStatus("Graph did not confirm role assignment", roleResponse);
+                        await ReportGraphStatusAsync("Graph did not confirm role assignment", roleResponse, http);
                     }
                 }
 
                 using var groupResponse = await AddGroupMemberAsync(http, groupId, createdUser.Id);
                 if (groupResponse.StatusCode != HttpStatusCode.NoContent)
                 {
-                    ReportGraphStatus("Graph did not confirm security group membership", groupResponse);
+                    await ReportGraphStatusAsync("Graph did not confirm security group membership", groupResponse, http);
                     Console.Error.WriteLine(retryHint);
                     return 1;
                 }
@@ -273,7 +275,7 @@ internal static class UserCommands
         using var response = await http.GetAsync($"{GraphServicePrincipalsUrl}(appId='{apiAppId:D}')?$select=id,appId,appRoles");
         if (response.StatusCode != HttpStatusCode.OK)
         {
-            ReportGraphStatus("Graph could not read the API enterprise application", response);
+            await ReportGraphStatusAsync("Graph could not read the API enterprise application", response, http);
             return null;
         }
 
@@ -305,22 +307,54 @@ internal static class UserCommands
         http.PostAsJsonAsync($"{GraphBaseUrl}/groups/{groupId:D}/members/$ref",
             new Dictionary<string, string> { ["@odata.id"] = $"{GraphBaseUrl}/directoryObjects/{userId:D}" });
 
-    private static void ReportGraphStatus(string message, HttpResponseMessage response)
+    private static async Task ReportGraphStatusAsync(
+        string message, HttpResponseMessage response, HttpClient http, string? password = null)
     {
         var requestId = response.Headers.TryGetValues("request-id", out var values) ? values.FirstOrDefault() : null;
         Console.Error.WriteLine($"{message}: HTTP {(int)response.StatusCode} (request ID: {requestId ?? "unavailable"}).");
+        try
+        {
+            var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+            if (body.ValueKind != JsonValueKind.Object ||
+                !body.TryGetProperty("error", out var error) || error.ValueKind != JsonValueKind.Object)
+            {
+                Console.Error.WriteLine("Graph error details unavailable: no structured error returned.");
+                return;
+            }
+
+            var reported = false;
+            foreach (var field in new[] { "code", "message" })
+            {
+                if (!error.TryGetProperty(field, out var value) || value.ValueKind != JsonValueKind.String)
+                {
+                    continue;
+                }
+                var text = value.GetString()!;
+                foreach (var secret in new[] { password, http.DefaultRequestHeaders.Authorization?.Parameter })
+                {
+                    if (!string.IsNullOrEmpty(secret))
+                    {
+                        text = text.Replace(secret, "[REDACTED]", StringComparison.Ordinal);
+                    }
+                }
+                text = new string(text.Select(character => char.IsControl(character) ? ' ' : character).ToArray());
+                Console.Error.WriteLine($"Graph error {field}: {text[..Math.Min(text.Length, 1024)]}");
+                reported = true;
+            }
+            if (!reported)
+            {
+                Console.Error.WriteLine("Graph error details unavailable: no error code or message returned.");
+            }
+        }
+        catch (JsonException)
+        {
+            Console.Error.WriteLine("Graph error details unavailable: response was not valid JSON.");
+        }
     }
 
-    private static async Task<HttpResponseMessage?> CreateUserAsync(
-        HttpClient http, string tenantDomain, string email, string givenName, string surname, string extensionProperty, string label)
+    private static Task<HttpResponseMessage> CreateUserAsync(
+        HttpClient http, string tenantDomain, string email, string givenName, string surname, string extensionProperty, string label, string password)
     {
-        var password = ReadPassword();
-        if (string.IsNullOrWhiteSpace(password))
-        {
-            Console.Error.WriteLine("No password entered; no account was created.");
-            return null;
-        }
-
         var user = new Dictionary<string, object>
         {
             ["accountEnabled"] = true,
@@ -334,7 +368,7 @@ internal static class UserCommands
             [extensionProperty] = label
         };
 
-        return await http.PostAsJsonAsync(GraphUsersUrl, user);
+        return http.PostAsJsonAsync(GraphUsersUrl, user);
     }
 
     private static string ReadPassword()
