@@ -23,9 +23,21 @@ var m2mRoleName = 'CRM.Read.App'
 var m2mRoleId = guid(tenant().tenantId, apiUniqueName, m2mRoleName)
 var graphAppId = '00000003-0000-0000-c000-000000000000'
 var graphUserReadWriteAllDelegatedId = '204e0828-b5ca-4ad8-b9f3-f32a958e7cc4'
+var graphGroupMemberReadWriteAllDelegatedId = 'f81125ac-d3b7-4573-a3b2-7099cc39df9e'
 var graphApplicationReadAllDelegatedId = 'c79f8feb-a9db-4090-85f9-90d820caa0eb'
 var graphAppRoleAssignmentReadWriteAllDelegatedId = '84bccea3-f856-4a8a-967b-dbe0a3d53a64'
 var loopbackUris = ['http://localhost']
+var customerGroupName = '${namePrefix}-Customers${uniqueNameSuffix}'
+
+resource customerGroup 'Microsoft.Graph/groups@v1.0' = {
+  uniqueName: customerGroupName
+  displayName: customerGroupName
+  description: 'Customers created by the Entra External ID lab.'
+  groupTypes: []
+  mailEnabled: false
+  mailNickname: '${namePrefix}-CG${uniqueNameSuffix}'
+  securityEnabled: true
+}
 
 resource provisioningApp 'Microsoft.Graph/applications@v1.0' = {
   uniqueName: '${namePrefix}-Provisioning${uniqueNameSuffix}'
@@ -40,6 +52,10 @@ resource provisioningApp 'Microsoft.Graph/applications@v1.0' = {
       resourceAccess: [
         {
           id: graphUserReadWriteAllDelegatedId
+          type: 'Scope'
+        }
+        {
+          id: graphGroupMemberReadWriteAllDelegatedId
           type: 'Scope'
         }
         {
@@ -148,6 +164,12 @@ resource m2mEnterpriseApp 'Microsoft.Graph/servicePrincipals@v1.0' = {
   appId: m2mApp.appId
 }
 
+resource m2mReaderAssignment 'Microsoft.Graph/appRoleAssignedTo@v1.0' = {
+  principalId: m2mEnterpriseApp.id
+  resourceId: apiEnterpriseApp.id
+  appRoleId: m2mRoleId
+}
+
 output provisioningClientId string = provisioningApp.appId
 output apiClientId string = apiApp.appId
 output clientId string = clientApp.appId
@@ -155,3 +177,4 @@ output m2mClientId string = m2mApp.appId
 output apiScope string = '${apiIdentifierUri}/${crmReadScopeName}'
 output apiDefaultScope string = '${apiIdentifierUri}/.default'
 output apiEnterpriseAppObjectId string = apiEnterpriseApp.id
+output customerGroupObjectId string = customerGroup.id

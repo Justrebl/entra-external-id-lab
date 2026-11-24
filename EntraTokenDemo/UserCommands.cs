@@ -10,8 +10,9 @@ internal static class UserCommands
 {
     private const string AttributeName = "Customer_Label";
     private const string AuthoritySuffix = ".ciamlogin.com";
-    private const string GraphUsersUrl = "https://graph.microsoft.com/v1.0/users";
-    private const string GraphServicePrincipalsUrl = "https://graph.microsoft.com/v1.0/servicePrincipals";
+    private const string GraphBaseUrl = "https://graph.microsoft.com/v1.0";
+    private const string GraphUsersUrl = GraphBaseUrl + "/users";
+    private const string GraphServicePrincipalsUrl = GraphBaseUrl + "/servicePrincipals";
     private const string GraphScopePrefix = "https://graph.microsoft.com/";
     private const string DefaultRole = "Reader";
 
@@ -110,6 +111,13 @@ internal static class UserCommands
             Console.Error.WriteLine("Set ENTRA_EXTENSIONS_APP_ID to the b2c-extensions-app Application (client) ID.");
             return 2;
         }
+        var groupId = Guid.Empty;
+        if (!update &&
+            (!Guid.TryParse(Environment.GetEnvironmentVariable("ENTRA_CUSTOMER_GROUP_ID"), out groupId) || groupId == Guid.Empty))
+        {
+            Console.Error.WriteLine("Set ENTRA_CUSTOMER_GROUP_ID to the lab security group's Object ID from preprovision.");
+            return 2;
+        }
         var apiAppId = Guid.Empty;
         if (role is not null &&
             (!Guid.TryParse(Environment.GetEnvironmentVariable("ENTRA_API_APP_ID"), out apiAppId) || apiAppId == Guid.Empty))
@@ -128,10 +136,15 @@ internal static class UserCommands
         var retryHint = role is null
             ? (update ? "Check the user's label before retrying." : "Check whether the account exists before retrying.")
             : "No account was created; the API role must be verified first.";
-        const string assignmentRecovery = "Customer account created, but the role assignment was not confirmed. Check Users and groups on the API enterprise application and assign the role there if needed. Do not rerun create-user.";
-        string[] scopes = role is null
-            ? ["User.ReadWrite.All"]
-            : ["User.ReadWrite.All", "Application.Read.All", "AppRoleAssignment.ReadWrite.All"];
+        const string partialCreation = "Customer account created. Do not rerun create-user.";
+        const string groupRecovery = "Check Members on the lab security group and add the user directly if needed.";
+        const string roleRecovery = "Check Users and groups on the API enterprise application and assign the requested role if needed.";
+        string[] scopes = (update, role) switch
+        {
+            (true, _) => ["User.ReadWrite.All"],
+            (false, null) => ["User.ReadWrite.All", "GroupMember.ReadWrite.All"],
+            _ => ["User.ReadWrite.All", "GroupMember.ReadWrite.All", "Application.Read.All", "AppRoleAssignment.ReadWrite.All"]
+        };
         try
         {
             Console.Error.WriteLine($"Sign in to {tenantDomain} with an account authorized to {operation} users.");
@@ -144,11 +157,11 @@ internal static class UserCommands
                 .WithPrompt(Prompt.SelectAccount)
                 .ExecuteAsync();
 
-            if (role is not null && scopes.Any(scope => !result.Scopes.Any(granted =>
+            if (!update && scopes.Any(scope => !result.Scopes.Any(granted =>
                 granted.Equals(scope, StringComparison.OrdinalIgnoreCase) ||
                 granted.Equals(GraphScopePrefix + scope, StringComparison.OrdinalIgnoreCase))))
             {
-                Console.Error.WriteLine("The Graph token lacks a required delegated permission for role assignment. No account was created.");
+                Console.Error.WriteLine("The Graph token lacks a required delegated permission for create-user. Check provisioning app consent. No account was created.");
                 return 1;
             }
 
@@ -182,28 +195,50 @@ internal static class UserCommands
                 return 1;
             }
 
-            if (assignment is not null)
+            if (!update)
             {
-                retryHint = assignmentRecovery;
+                retryHint = assignment is null
+                    ? $"{partialCreation} {groupRecovery}"
+                    : $"{partialCreation} {roleRecovery} {groupRecovery}";
                 var createdUser = await response.Content.ReadFromJsonAsync<CreatedUser>();
                 if (createdUser is null || createdUser.Id == Guid.Empty)
                 {
-                    Console.Error.WriteLine($"Graph did not return the new user's object ID. {assignmentRecovery}");
+                    Console.Error.WriteLine($"Graph did not return the new user's object ID. {retryHint}");
                     return 1;
                 }
 
-                using var roleResponse = await AssignUserRoleAsync(http, assignment, createdUser.Id);
-                if (roleResponse.StatusCode != HttpStatusCode.Created)
+                var roleConfirmed = true;
+                if (assignment is not null)
                 {
-                    ReportGraphStatus("Graph did not confirm role assignment", roleResponse);
-                    Console.Error.WriteLine(assignmentRecovery);
+                    using var roleResponse = await AssignUserRoleAsync(http, assignment, createdUser.Id);
+                    roleConfirmed = roleResponse.StatusCode == HttpStatusCode.Created;
+                    if (roleConfirmed)
+                    {
+                        retryHint = $"{partialCreation} {groupRecovery}";
+                    }
+                    else
+                    {
+                        ReportGraphStatus("Graph did not confirm role assignment", roleResponse);
+                    }
+                }
+
+                using var groupResponse = await AddGroupMemberAsync(http, groupId, createdUser.Id);
+                if (groupResponse.StatusCode != HttpStatusCode.NoContent)
+                {
+                    ReportGraphStatus("Graph did not confirm security group membership", groupResponse);
+                    Console.Error.WriteLine(retryHint);
+                    return 1;
+                }
+                if (!roleConfirmed)
+                {
+                    Console.Error.WriteLine($"{partialCreation} The user was added to the lab security group. {roleRecovery}");
                     return 1;
                 }
             }
 
             Console.WriteLine(update ? "Customer label updated." : role is null
-                ? "Customer account created."
-                : $"Customer account created and assigned the {role} API role.");
+                ? "Customer account created and added to the lab security group."
+                : $"Customer account created, added to the lab security group, and assigned the {role} API role.");
             return 0;
         }
         catch (MsalException ex)
@@ -265,6 +300,10 @@ internal static class UserCommands
     private static Task<HttpResponseMessage> AssignUserRoleAsync(HttpClient http, RoleAssignment role, Guid userId) =>
         http.PostAsJsonAsync($"{GraphServicePrincipalsUrl}/{role.ResourceId:D}/appRoleAssignedTo",
             new { principalId = userId, resourceId = role.ResourceId, appRoleId = role.RoleId });
+
+    private static Task<HttpResponseMessage> AddGroupMemberAsync(HttpClient http, Guid groupId, Guid userId) =>
+        http.PostAsJsonAsync($"{GraphBaseUrl}/groups/{groupId:D}/members/$ref",
+            new Dictionary<string, string> { ["@odata.id"] = $"{GraphBaseUrl}/directoryObjects/{userId:D}" });
 
     private static void ReportGraphStatus(string message, HttpResponseMessage response)
     {

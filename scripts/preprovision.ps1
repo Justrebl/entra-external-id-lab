@@ -325,11 +325,11 @@ if (-not $appSuffix) {
 $appNameSuffix = $appSuffix.ToUpperInvariant()
 $deploymentPrefix = if ($appPrefix -eq 'DEMO') { 'entra-lab' } else { $appPrefix.ToLowerInvariant() }
 $deploymentName = "$deploymentPrefix-apps-$($appSuffix.ToLowerInvariant())"
-Write-Host "Deploying four app registrations: ${appPrefix}_PROVISIONING_$appNameSuffix, ${appPrefix}_API_$appNameSuffix, ${appPrefix}_CLIENT_$appNameSuffix, and ${appPrefix}_M2M_$appNameSuffix..."
+Write-Host "Deploying lab apps, the ${appPrefix}-Customers-$appNameSuffix security group, and the M2M API role assignment..."
 $deploymentJson = az deployment tenant create --name $deploymentName --location $location `
     --template-file $template --parameters "namePrefix=$appPrefix" "appSuffix=$appSuffix" `
     --query properties.outputs --output json
-if ($LASTEXITCODE -ne 0) { throw 'Entra app deployment failed; see the Azure CLI error above.' }
+if ($LASTEXITCODE -ne 0) { throw 'Entra lab deployment failed; see the Azure CLI error above.' }
 
 $outputs = $deploymentJson | Out-String | ConvertFrom-Json
 $settings = [ordered]@{
@@ -339,6 +339,7 @@ $settings = [ordered]@{
     ENTRA_API_APP_ID          = $outputs.apiClientId.value
     ENTRA_CLIENT_ID           = $outputs.clientId.value
     ENTRA_M2M_CLIENT_ID       = $outputs.m2mClientId.value
+    ENTRA_CUSTOMER_GROUP_ID   = $outputs.customerGroupObjectId.value
     ENTRA_API_SCOPE           = $outputs.apiScope.value
     ENTRA_API_DEFAULT_SCOPE   = $outputs.apiDefaultScope.value
 }
@@ -356,12 +357,17 @@ if (-not [Guid]::TryParse($settings.ENTRA_M2M_CLIENT_ID, [ref]$m2mClientId) -or
     $m2mClientId -eq [Guid]::Empty -or $m2mClientId -eq $clientId) {
     throw 'The deployment did not return a valid, separate M2M client application ID.'
 }
-Write-Host 'Bicep deployment complete. Saving app registration outputs...'
+$customerGroupId = [Guid]::Empty
+if (-not [Guid]::TryParse($settings.ENTRA_CUSTOMER_GROUP_ID, [ref]$customerGroupId) -or
+    $customerGroupId -eq [Guid]::Empty) {
+    throw 'The deployment did not return a valid customer security group object ID; environment outputs were not saved.'
+}
+Write-Host 'Bicep deployment complete. Saving lab outputs...'
 foreach ($entry in $settings.GetEnumerator()) {
     azd env set $entry.Key $entry.Value --environment $env:AZURE_ENV_NAME | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Could not save $($entry.Key) in the azd environment." }
 }
-Write-Host 'App registration outputs saved to the selected azd environment.'
+Write-Host 'Lab outputs saved to the selected azd environment.'
 
 if ($autoCreateUserFlow) {
     $flowName = "LabSignIn-$appPrefix-$appNameSuffix"
